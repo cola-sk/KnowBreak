@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import load_config
-from .pipeline import STAGES, artifact_path, list_projects, run_full
+from .pipeline import SHARED_STAGES, STAGES, artifact_path, list_projects, run_full
 from .stages import assets as assets_stage
 from .stages import asr as asr_stage
 from .stages import compose as compose_stage
@@ -29,11 +29,27 @@ console = Console()
 def run(
     source: str = typer.Argument(..., help="视频 URL 或本地文件路径"),
     resume: str = typer.Option(None, "--from", help="从指定阶段续跑: " + "|".join(STAGES)),
+    version_mode: str = typer.Option(
+        "legacy",
+        "--version-mode",
+        help="版本模式: legacy|create|update。create 会新建 out/<id>/<version>，update 会覆盖指定版本。",
+    ),
+    version: str = typer.Option(None, "--version", help="版本号/名称，例如 v001 或 draft-a"),
 ):
     """全流程：一个视频跑到自动成片 MP4。"""
     cfg = load_config()
-    vid = run_full(source, cfg, start_from=resume)
+    if version_mode not in {"legacy", "create", "update"}:
+        raise typer.BadParameter("--version-mode 只能是 legacy/create/update")
+    vid, resolved_version = run_full(
+        source,
+        cfg,
+        start_from=resume,
+        version_mode=version_mode,  # type: ignore[arg-type]
+        version=version,
+    )
     console.print(f"\n[green]video_id[/] = {vid}")
+    if resolved_version:
+        console.print(f"[green]version[/] = {resolved_version}")
 
 
 @app.command(name="asr")
@@ -146,10 +162,21 @@ def list_():
     if not projects:
         console.print("[yellow]暂无项目[/]")
         return
-    table = Table("video_id", "已完成阶段")
+    table = Table("video_id", "version", "已完成阶段")
     for p in projects:
         done = [s for s in STAGES if artifact_path(p.name, s, cfg).exists()]
-        table.add_row(p.name, " → ".join(done) or "—")
+        version_dirs = sorted(d for d in p.iterdir() if d.is_dir())
+        has_legacy_outputs = any(s not in SHARED_STAGES for s in done)
+        if done and (has_legacy_outputs or not version_dirs):
+            table.add_row(p.name, "legacy", " → ".join(done))
+        for version_dir in version_dirs:
+            vdone = [
+                s
+                for s in STAGES
+                if artifact_path(p.name, s, cfg, version=version_dir.name).exists()
+            ]
+            if vdone:
+                table.add_row(p.name, version_dir.name, " → ".join(vdone))
     console.print(table)
 
 
@@ -157,12 +184,13 @@ def list_():
 def show(
     video_id: str = typer.Argument(..., help="video id"),
     stage: str = typer.Option(None, "--stage", "-s", help="只看某阶段: " + "|".join(STAGES)),
+    version: str = typer.Option(None, "--version", help="查看指定版本，例如 v001；不传则查看 legacy"),
 ):
     """查看某个项目的产出。"""
     cfg = load_config()
     stages = [stage] if stage else STAGES
     for s in stages:
-        p = artifact_path(video_id, s, cfg)
+        p = artifact_path(video_id, s, cfg, version=version)
         if not p.exists():
             console.print(f"[dim]— {s}: 未生成[/]")
             continue

@@ -17,6 +17,7 @@ class LLMConfig:
     api_key: str
     model: str
     temperature: float = 0.7
+    timeout: float = 120.0
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,7 @@ def load_config() -> Config:
             base_url=_env("KB_LLM_BASE_URL"),
             api_key=_env("KB_LLM_API_KEY"),
             model=_env("KB_LLM_MODEL"),
+            timeout=_float_env("KB_LLM_TIMEOUT", 120.0),
         ),
         asr=ASRConfig(
             provider=_env("KB_ASR_PROVIDER", "openai"),

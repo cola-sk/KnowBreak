@@ -2,35 +2,46 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Literal
 
 from rich.console import Console
 
 from .config import Config
 from .stages import asr, extract, topics, script, storyboard, assets, images, tts, compose
-from .stages._common import project_dir, video_id_from_source
+from .stages._common import project_dir, project_version_dir, video_id_from_source
 
 console = Console()
 
 STAGES = ["asr", "extract", "topics", "script", "storyboard", "assets", "images", "tts", "compose"]
+SHARED_STAGES = {"asr", "extract"}
+VersionMode = Literal["legacy", "create", "update"]
 
 
-def run_full(source: str, cfg: Config, start_from: str | None = None) -> str:
+def run_full(
+    source: str,
+    cfg: Config,
+    start_from: str | None = None,
+    version_mode: VersionMode = "legacy",
+    version: str | None = None,
+) -> tuple[str, str | None]:
     """全流程跑一个视频。返回 video_id。"""
     video_id = video_id_from_source(source)
-    pdir = project_dir(cfg.out_dir, video_id)
+    pdir, resolved_version = resolve_project_run_dir(cfg, video_id, version_mode, version)
+    shared_dir = project_dir(cfg.out_dir, video_id) if resolved_version else pdir
 
     start_idx = 0 if start_from is None else STAGES.index(start_from)
 
     if start_idx <= 0:
         console.print(f"[cyan]▸ 阶段 1/9 字幕/ASR 转写[/]: {source}")
-        asr.run(source, cfg)
+        asr.run(source, cfg, pdir=shared_dir)
     if start_idx <= 1:
         console.print("[cyan]▸ 阶段 2/9 知识点提取[/]")
-        extract.run(pdir / "transcript.json", cfg)
+        extract.run(shared_dir / "transcript.json", cfg)
     if start_idx <= 2:
         console.print("[cyan]▸ 阶段 3/9 选题拆分[/]")
-        topics.run(pdir / "knowledge.json", cfg)
+        topics.run(shared_dir / "knowledge.json", cfg, output_dir=pdir)
     if start_idx <= 3:
         console.print("[cyan]▸ 阶段 4/9 口播脚本[/]")
         script.run(pdir / "topics.json", cfg)
@@ -51,14 +62,64 @@ def run_full(source: str, cfg: Config, start_from: str | None = None) -> str:
         compose.run(pdir / "tts.json", cfg)
 
     console.print(f"[green]✓ 完成[/] 产出目录: {pdir}")
-    return video_id
+    return video_id, resolved_version
 
 
-def artifact_path(video_id: str, stage: str, cfg: Config) -> Path:
-    pdir = project_dir(cfg.out_dir, video_id)
+def resolve_project_run_dir(
+    cfg: Config,
+    video_id: str,
+    mode: VersionMode,
+    version: str | None,
+) -> tuple[Path, str | None]:
+    if mode == "legacy":
+        if version:
+            raise ValueError("legacy 模式不接受 --version；请使用 --version-mode create/update")
+        return project_dir(cfg.out_dir, video_id), None
+
+    if version:
+        _validate_version(version)
+
+    if mode == "create":
+        resolved = version or _next_version(cfg.out_dir, video_id)
+        pdir = cfg.out_dir / video_id / resolved
+        if pdir.exists():
+            raise FileExistsError(f"版本已存在，不能 create 覆盖: {pdir}")
+        return project_version_dir(cfg.out_dir, video_id, resolved), resolved
+
+    if mode == "update":
+        if not version:
+            raise ValueError("update 模式必须传 --version，例如 --version v001")
+        pdir = cfg.out_dir / video_id / version
+        if not pdir.exists():
+            raise FileNotFoundError(f"要更新的版本不存在: {pdir}")
+        return pdir, version
+
+    raise ValueError(f"未知 version mode: {mode}")
+
+
+def _validate_version(version: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", version):
+        raise ValueError("version 只能包含字母、数字、点、下划线和中划线")
+
+
+def _next_version(out_dir: Path, video_id: str) -> str:
+    base = project_dir(out_dir, video_id)
+    max_n = 0
+    for p in base.iterdir():
+        if not p.is_dir():
+            continue
+        m = re.fullmatch(r"v(\d{3,})", p.name)
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"v{max_n + 1:03d}"
+
+
+def artifact_path(video_id: str, stage: str, cfg: Config, version: str | None = None) -> Path:
+    project = project_dir(cfg.out_dir, video_id)
+    pdir = project if version is None or stage in SHARED_STAGES else project / version
     return {
-        "asr": pdir / "transcript.json",
-        "extract": pdir / "knowledge.json",
+        "asr": project / "transcript.json",
+        "extract": project / "knowledge.json",
         "topics": pdir / "topics.json",
         "script": pdir / "scripts.json",
         "storyboard": pdir / "storyboards.json",

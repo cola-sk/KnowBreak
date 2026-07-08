@@ -22,9 +22,9 @@ SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass"}
 SUBTITLE_LANGS = "zh-Hans,zh-CN,zh-Hant,zh,en"
 
 
-def run(source: str, cfg: Config) -> Transcript:
+def run(source: str, cfg: Config, pdir: Path | None = None) -> Transcript:
     video_id = video_id_from_source(source)
-    pdir = project_dir(cfg.out_dir, video_id)
+    pdir = pdir or project_dir(cfg.out_dir, video_id)
 
     subtitle_path = _find_or_fetch_subtitle(source, pdir, cfg)
     subtitle_segments = _parse_subtitle(subtitle_path) if subtitle_path else []

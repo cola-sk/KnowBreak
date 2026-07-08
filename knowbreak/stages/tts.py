@@ -14,12 +14,12 @@ from pathlib import Path
 
 from ..config import Config
 from ..models import Scripts, TTSLine, TTSResult, TTSScript
-from ._common import project_dir, save_json
+from ._common import save_json
 
 
 def run(scripts_path: Path, cfg: Config) -> TTSResult:
     scripts: Scripts = Scripts.model_validate_json(scripts_path.read_text(encoding="utf-8"))
-    pdir = project_dir(cfg.out_dir, scripts.video_id)
+    pdir = scripts_path.resolve().parent
     tts_dir = pdir / "tts"
     tts_dir.mkdir(exist_ok=True)
 

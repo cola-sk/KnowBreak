@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 from ..config import Config
 from ..llm import LLM
 from ..models import Storyboards
-from ._common import project_dir
 
 PEXELS_SEARCH = "https://api.pexels.com/v1/search"
 PIXABAY_SEARCH = "https://pixabay.com/api/"
@@ -68,7 +67,7 @@ def run(
         storyboards_path.read_text(encoding="utf-8")
     )
 
-    pdir = project_dir(cfg.out_dir, boards.video_id)
+    pdir = storyboards_path.resolve().parent
     images_dir = pdir / "images"
     images_dir.mkdir(exist_ok=True)
     providers = _active_providers(cfg)

@@ -22,6 +22,12 @@ def project_dir(out_dir: Path, video_id: str) -> Path:
     return p
 
 
+def project_version_dir(out_dir: Path, video_id: str, version: str) -> Path:
+    p = project_dir(out_dir, video_id) / version
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def save_json(model: BaseModel, path: Path) -> None:
     path.write_text(model.model_dump_json(indent=2), encoding="utf-8")
 

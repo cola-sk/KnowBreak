@@ -49,7 +49,9 @@ uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID"
 
 会按顺序自动跑完 9 个阶段（asr → extract → topics → script → storyboard → assets → images → tts → compose），最终在 `out/<video_id>/compose/` 下产出 3-5 个 MP4（每个选题一个，1080×1920 竖屏，开头标题封面 + 配图背景 + 烧入字幕 + edge-tts 配音）。
 
-**耗时参考**：25 分钟源视频 ≈ 15 分钟跑完（下载 + ASR + 5 轮 LLM + 图片获取 + TTS + 成片）。
+默认内容风格是面向中国抖音/视频号的严肃科普：标题和开头有信息流抓力，但脚本保持克制、可信、强调误区纠偏、关键证据和可执行结论。
+
+**耗时参考**：25 分钟源视频 ≈ 15 分钟跑完（下载 + ASR + 多轮 LLM + 图片获取 + TTS + 成片）。如果某个 LLM 请求超过 `KB_LLM_TIMEOUT`，流程会中断并保留已生成的中间产物；质量关键阶段不自动降级生成低质量结果。
 
 **常用变体**：
 
@@ -67,6 +69,22 @@ uv run knowbreak compose out/<id>/tts.json --topic 2
 # 看所有项目进度
 uv run knowbreak list
 uv run knowbreak show <id>
+```
+
+默认不启用版本层，产物仍写在 `out/<video_id>/`，`list` 中显示为 `legacy`。如果要在同一个视频下面保留多次成片版本，使用 `--version-mode`。版本模式下，`source.mp4`、`audio.wav`、`transcript.json`、`knowledge.json` 会放在 `out/<video_id>/` 根目录作为共享基础产物；`v001/v002/...` 只保存从选题开始的版本化产物。
+
+```bash
+# 自动新建 out/<id>/v001；再次 create 会生成 v002、v003...
+uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --version-mode create
+
+# 指定版本名新建
+uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --version-mode create --version draft-a
+
+# 覆盖更新已有版本；update 必须传 --version，避免误覆盖
+uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --version-mode update --version draft-a --from images
+
+# 查看某个版本
+uv run knowbreak show <id> --version draft-a
 ```
 
 **前置条件**（首次配置后不用再动）：
@@ -106,6 +124,7 @@ cp .env.example .env
 KB_LLM_BASE_URL=https://api.deepseek.com/v1
 KB_LLM_API_KEY=sk-...
 KB_LLM_MODEL=deepseek-chat
+KB_LLM_TIMEOUT=120   # 单次 LLM 请求超时秒数；超时后流程中断，保留中间产物
 
 KB_ASR_PROVIDER=openai
 KB_ASR_MODEL=whisper-1
@@ -144,7 +163,7 @@ PIXABAY_API_KEY=...
 KB_IMAGE_PROVIDERS=pixabay,pexels
 ```
 
-每个成片默认会在开头插入一张标题封面图，封面图优先使用 Pixabay，音频会延迟到封面结束后再开始：
+每个成片默认会在开头插入一张标题封面图，封面图跟随 `KB_IMAGE_PROVIDERS` 顺序（默认 Pexels → Pixabay），音频会延迟到封面结束后再开始：
 
 ```bash
 KB_INTRO_ENABLED=true
@@ -184,6 +203,26 @@ out/<video_id>/
 │       └── full.mp3      # 拼接后的完整配音
 └── compose/
     └── <topic>.mp4     # 最终成片：1080×1920 竖屏
+```
+
+如果使用版本模式，目录结构会变成共享基础产物 + 多个版本目录：
+
+```text
+out/<video_id>/
+├── source.mp4          # 共享：原视频
+├── audio.wav           # 共享：原视频音频
+├── transcript.json     # 共享：字幕/ASR 转写结果
+├── knowledge.json      # 共享：知识点提取
+├── v001/
+│   ├── topics.json
+│   ├── scripts.json
+│   ├── storyboards.json
+│   ├── assets.json
+│   ├── images.json
+│   ├── tts.json
+│   └── compose/<topic>.mp4
+└── v002/
+    └── ...
 ```
 
 断点续跑：
@@ -402,7 +441,7 @@ uv run knowbreak run "https://www.youtube.com/watch?v=XA42XDEJcTE"
 **输入**：25 分钟（1507s）中文科普视频，主题"牛奶与补钙"
 **总耗时**：约 15 分钟（视频下载 + ASR 转写 + 5 轮 LLM 调用 + 图片获取 + TTS + 成片）
 
-**产出**（`out/<video_id>/` 下）：
+**产出**（legacy 模式在 `out/<video_id>/` 下；版本模式下 asr/extract 在 `out/<video_id>/`，后续阶段在 `out/<video_id>/<version>/`）：
 
 | 阶段 | 文件 | 大小 | 内容 |
 |---|---|---|---|
@@ -427,6 +466,12 @@ open out/<video_id>/compose/4.mp4           # 直接预览成片
 
 `storyboards.json` 可以直接对照在剪映/CapCut 里搭时间线，`assets.json` 里的搜索词直接拿到 Pexels/Pixabay/Unsplash 找素材。`compose/<topic>.mp4` 已经是可以直接发抖音/视频号的成品（开头封面 + 配图 + 字幕 + 配音），不需要再剪辑也可以发。
 
+## 分镜生成（阶段 5）
+
+`storyboard` 阶段默认让 LLM 把口播拆成竖屏分镜，画面风格偏严肃科普：真人讲解、信息图、医学/科学示意、实拍素材和结论卡片。每个 shot 会包含 `narration`、`visual`、`broll`、`subtitle` 和 `duration`。
+
+如果分镜 LLM 超时、返回异常或 JSON 不合法，标准流程会直接中断。此时优先检查脚本质量、调整 prompt 或更换模型，再用 `--from storyboard` 或单阶段命令续跑；不要为了跑完整流程自动生成低质量分镜。
+
 ## 图片获取（阶段 7）
 
 为每个分镜自动下载一张竖向免版权图。默认支持两个 provider：
@@ -444,7 +489,7 @@ open out/<video_id>/compose/4.mp4           # 直接预览成片
 4. 过滤掉宽高小于 1080 的，下载封面图到 `images/<topic>/cover.jpg`，分镜图到 `images/<topic>/shot_<i>.jpg`
 5. 写入 `images.json`，记录 `cover`、`shots`、`provider`、`query`、图片路径、来源 URL、作者、license
 
-**fallback**：例如 `KB_IMAGE_PROVIDERS=pexels,pixabay` 时，普通分镜和封面图都会先查 Pexels；Pexels 没结果或没 key，再查 Pixabay。某个 shot 或 cover 两个 provider 都失败时，在 compose 阶段使用纯色背景。
+**provider fallback**：例如 `KB_IMAGE_PROVIDERS=pexels,pixabay` 时，普通分镜和封面图都会先查 Pexels；Pexels 没结果或没 key，再查 Pixabay。图片关键词 LLM 超时/失败时会中断，避免下载一批不对题图片。某个 shot 或 cover 两个 provider 都搜不到时，在 compose 阶段使用纯色背景。
 
 **去重**：同一个 topic 内会跳过已经用过的 `source_url`，避免 `cover.jpg` 和多个 `shot_<i>.jpg` 都下载成同一张图。
 
@@ -631,6 +676,10 @@ uv run knowbreak asr ./inputs/source.srt
 ### TTS 报 `edge-tts` 连接失败 / 超时
 
 edge-tts 走微软公共端点，国内偶尔会连不上。先重试一次；持续失败的话换音色（例如 `KB_TTS_VOICE=zh-CN-YunxiNeural`）或挂代理。`tts` 阶段是幂等的，重跑会覆盖之前生成的 mp3。
+
+### LLM 阶段超时 / 返回 JSON 解析失败
+
+`topics`、`script`、`storyboard`、`images` 关键词生成都属于质量关键阶段。超时或 JSON 不合法时流程会中断，不自动兜底生成低质量内容。先检查 `.env` 里的 `KB_LLM_MODEL` 和 `KB_LLM_TIMEOUT`，必要时换更稳定的模型或增大超时时间；确认前序产物没问题后，用 `--from <stage>` 或单阶段命令续跑。
 
 ### 图片 provider 报 `401 Unauthorized` 或 `429 Too Many Requests`
 

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from ..config import Config
 from ..llm import LLM
 from ..models import Knowledge, Transcript
-from ._common import project_dir, save_json
+from ._common import save_json
 
 
 class _ExtractSchema(BaseModel):
@@ -50,7 +50,7 @@ def run(transcript_path: Path, cfg: Config) -> Knowledge:
         domain=schema.domain,
         points=schema.points,  # type: ignore[arg-type]
     )
-    pdir = project_dir(cfg.out_dir, transcript.video_id)
+    pdir = transcript_path.parent
     save_json(knowledge, pdir / "knowledge.json")
     return knowledge
 

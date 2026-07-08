@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from ..config import Config
 from ..llm import LLM
 from ..models import Scripts, Storyboard, Storyboards, StoryboardShot
-from ._common import project_dir, save_json
+from ._common import save_json
 
 
 class _ShotItem(BaseModel):
@@ -28,14 +28,15 @@ class _StoryboardSchema(BaseModel):
     shots: list[_ShotItem]
 
 
-_SYSTEM = """你是短视频分镜师。
-任务：把一段口播脚本拆成画面分镜。
+_SYSTEM = """你是中国抖音严肃科普账号的短视频分镜师。
+任务：把一段口播脚本拆成画面分镜，画面风格要专业、清楚、可信，同时适合竖屏信息流观看。
 
 要求：
-- 每个 shot 包含：narration(对应口播文字，可逐句或合并), visual(画面描述，给真人讲/动画/PPT/实拍), broll(B-roll 素材建议), subtitle(精简字幕), duration(秒)
+- 每个 shot 包含：narration(对应口播文字，可逐句或合并), visual(画面描述，给真人讲/信息图/医学或科学示意/实拍), broll(B-roll 素材建议), subtitle(精简字幕), duration(秒)
 - 所有 shot 的 narration 拼起来要覆盖完整口播内容
-- subtitle 要精简，不要把 narration 全塞进字幕
-- visual 描述要具体，便于后期直接对照制作
+- subtitle 要精简、有信息密度，不要把 narration 全塞进字幕
+- visual 优先选择严肃科普画面：简洁真人讲解、实验/食物/人体示意、数据卡片、对比图、机制流程图
+- B-roll 要具体、可搜索，避免把比喻当字面素材
 - 不使用任何原视频的画面/截图，全部原创或免版权素材
 """
 
@@ -62,6 +63,6 @@ def run(scripts_path: Path, cfg: Config) -> Storyboards:
             )
         )
     out = Storyboards(video_id=scripts.video_id, storyboards=boards)
-    pdir = project_dir(cfg.out_dir, scripts.video_id)
+    pdir = scripts_path.resolve().parent
     save_json(out, pdir / "storyboards.json")
     return out

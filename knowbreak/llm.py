@@ -16,7 +16,7 @@ T = TypeVar("T", bound=BaseModel)
 class LLM:
     def __init__(self, cfg: LLMConfig):
         self.cfg = cfg
-        self.client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+        self.client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key, timeout=cfg.timeout)
 
     def chat(self, system: str, user: str, *, temperature: float | None = None) -> str:
         resp = self.client.chat.completions.create(

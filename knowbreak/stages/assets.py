@@ -13,7 +13,6 @@ from pydantic import BaseModel
 from ..config import Config
 from ..llm import LLM
 from ..models import AssetList, AssetSuggestion, Storyboards
-from ._common import project_dir
 import json
 
 
@@ -59,7 +58,7 @@ def run(storyboards_path: Path, cfg: Config) -> list[AssetList]:
                 assets=[AssetSuggestion(**a.model_dump()) for a in schema.items],
             )
         )
-    pdir = project_dir(cfg.out_dir, boards.video_id)
+    pdir = storyboards_path.parent
     (pdir / "assets.json").write_text(
         json.dumps([a.model_dump() for a in out], ensure_ascii=False, indent=2),
         encoding="utf-8",

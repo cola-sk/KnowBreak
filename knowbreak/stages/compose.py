@@ -17,7 +17,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..config import Config
 from ..models import TTSResult
-from ._common import project_dir
 
 _FONT_CANDIDATES = [
     "/System/Library/Fonts/PingFang.ttc",
@@ -49,11 +48,11 @@ COVER_OVERLAY_ALPHA = 120
 
 def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
     tts: TTSResult = TTSResult.model_validate_json(tts_path.read_text(encoding="utf-8"))
-    pdir = project_dir(cfg.out_dir, tts.video_id)
+    pdir = tts_path.resolve().parent
     compose_dir = pdir / "compose"
     compose_dir.mkdir(exist_ok=True)
 
-    images_map, cover_map = _load_images_map(pdir / "images.json")
+    images_map, cover_map = _load_images_map(pdir / "images.json", cfg.out_dir)
 
     videos = []
     for script in tts.scripts:
@@ -105,16 +104,15 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
     return result
 
 
-def _load_images_map(path: Path) -> tuple[dict[int, dict[int, str]], dict[int, str]]:
+def _load_images_map(path: Path, out_dir: Path) -> tuple[dict[int, dict[int, str]], dict[int, str]]:
     """读 images.json，返回 shot 图和封面图。
 
-    images.json 位于 out/<vid>/images.json，image_path 形如
-    "<vid>/images/4/shot_000.jpg"（相对 out_dir），故绝对路径 = path.parent.parent / image_path。
+    image_path 形如 "<vid>/images/4/shot_000.jpg" 或
+    "<vid>/<version>/images/4/shot_000.jpg"，统一相对 cfg.out_dir。
     """
     if not path.exists():
         return {}, {}
     data = json.loads(path.read_text(encoding="utf-8"))
-    out_dir = path.parent.parent  # out/<vid>/images.json → out/
     result: dict[int, dict[int, str]] = {}
     covers: dict[int, str] = {}
     for topic in data:
