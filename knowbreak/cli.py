@@ -13,10 +13,13 @@ from .config import load_config
 from .pipeline import STAGES, artifact_path, list_projects, run_full
 from .stages import assets as assets_stage
 from .stages import asr as asr_stage
+from .stages import compose as compose_stage
 from .stages import extract as extract_stage
+from .stages import images as images_stage
 from .stages import script as script_stage
 from .stages import storyboard as storyboard_stage
 from .stages import topics as topics_stage
+from .stages import tts as tts_stage
 
 app = typer.Typer(add_completion=False, help="知点拆解局 — 知识二创短视频生产流水线")
 console = Console()
@@ -27,7 +30,7 @@ def run(
     source: str = typer.Argument(..., help="视频 URL 或本地文件路径"),
     resume: str = typer.Option(None, "--from", help="从指定阶段续跑: " + "|".join(STAGES)),
 ):
-    """全流程：一个视频跑到分镜表。"""
+    """全流程：一个视频跑到自动成片 MP4。"""
     cfg = load_config()
     vid = run_full(source, cfg, start_from=resume)
     console.print(f"\n[green]video_id[/] = {vid}")
@@ -91,6 +94,48 @@ def assets_cmd(
     cfg = load_config()
     a = assets_stage.run(storyboards_path, cfg)
     console.print(f"[green]✓[/] 生成 {len(a)} 份资源清单")
+
+
+@app.command(name="images")
+def images_cmd(
+    storyboards_path: Path = typer.Argument(..., help="storyboards.json 路径"),
+    topic: int = typer.Option(None, "--topic", help="只处理指定选题"),
+    cover_only: bool = typer.Option(False, "--cover-only", help="只重新获取开头封面图，不改分镜配图"),
+):
+    """阶段 7：图片获取。"""
+    cfg = load_config()
+    r = images_stage.run(storyboards_path, cfg, only_topic=topic, cover_only=cover_only)
+    total = sum(len(t.get("shots", [])) for t in r)
+    covers = sum(1 for t in r if t.get("cover"))
+    if cover_only:
+        console.print(f"[green]✓[/] 更新 {covers} 张封面，保留 {total} 张分镜配图")
+    else:
+        console.print(f"[green]✓[/] 获取 {covers} 张封面、{total} 张分镜配图，覆盖 {len(r)} 个选题")
+
+
+@app.command(name="tts")
+def tts_cmd(
+    scripts_path: Path = typer.Argument(..., help="scripts.json 路径"),
+):
+    """阶段 8：TTS 配音。"""
+    cfg = load_config()
+    r = tts_stage.run(scripts_path, cfg)
+    total = sum(s.total_duration for s in r.scripts)
+    console.print(f"[green]✓[/] 生成 {len(r.scripts)} 份配音, 总时长 {total:.0f}s")
+
+
+@app.command(name="compose")
+def compose_cmd(
+    tts_path: Path = typer.Argument(..., help="tts.json 路径"),
+    topic: int = typer.Option(None, "--topic", help="只生成指定选题的 MP4"),
+):
+    """阶段 9：自动成片（配图背景 + 字幕 + 配音 → MP4）。"""
+    cfg = load_config()
+    r = compose_stage.run(tts_path, cfg, only_topic=topic)
+    videos = [v for v in r["videos"] if topic is None or v["topic_index"] == topic]
+    console.print(f"[green]✓[/] 生成 {len(videos)} 个 MP4:")
+    for v in videos:
+        console.print(f"  - 选题 {v['topic_index']}: {v['title']} ({v['duration']:.0f}s) → out/{v['path']}")
 
 
 @app.command(name="list")

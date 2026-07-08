@@ -25,8 +25,55 @@
 分镜表（口播/画面描述/B-roll 建议/字幕）
    │  6. 资源清单            (assets) — 配图/PPT/动画/B-roll 候选
    ▼
-导出到剪映/PR/CapCut，人工成片 + 合规审核
+资源搜索词清单
+   │  7. 图片获取            (images) — Pexels/Pixabay 自动下载竖向免版权图
+   ▼
+每个 topic 一张开头封面图 + 每个分镜一张配图
+   │  8. TTS 配音            (tts) — edge-tts 合成每句 + 拼接完整 mp3
+   ▼
+每个选题一份完整配音
+   │  9. 自动成片            (compose) — 配图背景 + 字幕 + 配音 → MP4
+   ▼
+out/<id>/compose/<topic>.mp4
 ```
+
+> 想要全自动跑到 MP4 用 `knowbreak run`；只想搭时间线在剪映/CapCut 里精修，跑到 `storyboard` 或 `assets` 即可。
+
+## 一键执行（新视频最常用）
+
+配置好 `.env` 后（见下方 [配置](#配置)），一个新 YouTube 视频从下载到产出 N 个 MP4 只需一条命令：
+
+```bash
+uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+会按顺序自动跑完 9 个阶段（asr → extract → topics → script → storyboard → assets → images → tts → compose），最终在 `out/<video_id>/compose/` 下产出 3-5 个 MP4（每个选题一个，1080×1920 竖屏，开头标题封面 + 配图背景 + 烧入字幕 + edge-tts 配音）。
+
+**耗时参考**：25 分钟源视频 ≈ 15 分钟跑完（下载 + ASR + 5 轮 LLM + 图片获取 + TTS + 成片）。
+
+**常用变体**：
+
+```bash
+# 中途断了从某阶段续跑（已生成的产出会保留）
+uv run knowbreak run "..." --from tts
+
+# 想先看一个选题的效果，省图片 API 配额：分两步
+# 1) 先全流程跑到 compose（如果只关心单题，这步会浪费其他题的配额）
+#    更省的做法是跑到 assets 后停止，再单题跑后段：
+uv run knowbreak images out/<id>/storyboards.json --topic 2
+uv run knowbreak tts out/<id>/scripts.json
+uv run knowbreak compose out/<id>/tts.json --topic 2
+
+# 看所有项目进度
+uv run knowbreak list
+uv run knowbreak show <id>
+```
+
+**前置条件**（首次配置后不用再动）：
+
+- `.env` 里有 `KB_LLM_*` / `KB_ASR_*`；如果想自动配图，再配置 `PEXELS_API_KEY` 或 `PIXABAY_API_KEY`
+- YouTube 受限视频需要 `cookies.txt`（首次导出后不用再管，见 [方式三](#方式三youtube-登录态-cookies)）
+- 系统装了 `ffmpeg` 和 `deno`（见 [安装](#安装)）
 
 ## 安装
 
@@ -72,13 +119,45 @@ KB_ASR_BASE_URL=https://api.openai.com/v1
 KB_ASR_API_KEY=sk-...
 ```
 
+TTS 默认用 `edge-tts`（免费、无需 key），不配置也能跑。可调音色和语速：
+
+```bash
+KB_TTS_VOICE=zh-CN-XiaoxiaoNeural  # 默认女声，详见 .env.example
+KB_TTS_RATE=+0%                     # +10% 加速，-5% 减速
+```
+
+配图 provider 可选。默认按 `KB_IMAGE_PROVIDERS=pexels,pixabay` 的顺序尝试，某个 provider 没有 key 会自动跳过；两个 key 都不配置时，`images` 阶段只写空清单，`compose` 退化为纯色背景 + 字幕。
+
+```bash
+KB_IMAGE_PROVIDERS=pexels,pixabay
+
+# Pexels: https://www.pexels.com/api/
+PEXELS_API_KEY=...
+
+# Pixabay: https://pixabay.com/api/docs/
+PIXABAY_API_KEY=...
+```
+
+如果想优先试 Pixabay，改成：
+
+```bash
+KB_IMAGE_PROVIDERS=pixabay,pexels
+```
+
+每个成片默认会在开头插入一张标题封面图，封面图优先使用 Pixabay，音频会延迟到封面结束后再开始：
+
+```bash
+KB_INTRO_ENABLED=true
+KB_INTRO_DURATION=2.0
+```
+
 ## 快速开始
 
 ```bash
 # 推荐通过 uv run 调用，确保使用项目虚拟环境里的依赖
 uv run knowbreak --help
 
-# 全流程：从一个视频链接或本地文件跑到资源清单
+# 全流程：从一个视频链接或本地文件跑到自动成片 MP4
 uv run knowbreak run https://www.bilibili.com/video/xxx
 uv run knowbreak run ./inputs/source.mp4
 ```
@@ -92,7 +171,19 @@ out/<video_id>/
 ├── topics.json         # 短视频选题
 ├── scripts.json        # 原创口播脚本
 ├── storyboards.json    # 画面分镜
-└── assets.json         # 资源清单
+├── assets.json         # 资源清单
+├── images.json         # 配图清单（provider/query/source/license/path）
+├── images/             # 图片本体（按 topic 分目录）
+│   └── <topic>/
+│       ├── cover.jpg
+│       └── shot_<i>.jpg
+├── tts.json            # TTS 配音元数据（每句实际时长）
+├── tts/                # 音频本体
+│   └── <topic>/
+│       ├── line_<i>.mp3  # 每句一段
+│       └── full.mp3      # 拼接后的完整配音
+└── compose/
+    └── <topic>.mp4     # 最终成片：1080×1920 竖屏
 ```
 
 断点续跑：
@@ -111,10 +202,44 @@ uv run knowbreak topics ./out/<id>/knowledge.json
 uv run knowbreak script ./out/<id>/topics.json
 uv run knowbreak storyboard ./out/<id>/scripts.json
 uv run knowbreak assets ./out/<id>/storyboards.json
+uv run knowbreak images ./out/<id>/storyboards.json            # 全部选题
+uv run knowbreak images ./out/<id>/storyboards.json --topic 4  # 只跑指定选题
+uv run knowbreak tts ./out/<id>/scripts.json
+uv run knowbreak compose ./out/<id>/tts.json                   # 全部选题
+uv run knowbreak compose ./out/<id>/tts.json --topic 4         # 只生成一个 MP4
 
 uv run knowbreak list
 uv run knowbreak show <id>
 uv run knowbreak show <id> --stage script
+```
+
+`images` 和 `compose` 都支持 `--topic`，便于先验证单题质量再批量跑，省图片 API 配额。
+
+### 单题重跑封面/配图
+
+当脚本、分镜和 TTS 已经生成，只想重新试某个选题的封面图和最终 MP4：
+
+```bash
+# 先让图片阶段重抓该 topic 的 cover.jpg 和 shot 图片
+uv run knowbreak images ./out/<id>/storyboards.json --topic 0
+
+# 再只重渲染该 topic 的视频
+uv run knowbreak compose ./out/<id>/tts.json --topic 0
+```
+
+如果只想重新获取封面，不想动正文分镜图：
+
+```bash
+uv run knowbreak images ./out/<id>/storyboards.json --topic 0 --cover-only
+uv run knowbreak compose ./out/<id>/tts.json --topic 0
+```
+
+重跑后重点看：
+
+```bash
+open ./out/<id>/images/0/cover.jpg
+open ./out/<id>/compose/0.mp4
+jq '.[] | select(.topic_index == 0) | .cover' ./out/<id>/images.json
 ```
 
 ## 下载视频和字幕
@@ -275,7 +400,7 @@ uv run knowbreak run "https://www.youtube.com/watch?v=XA42XDEJcTE"
 ```
 
 **输入**：25 分钟（1507s）中文科普视频，主题"牛奶与补钙"
-**总耗时**：约 12 分钟（视频下载 + ASR 转写 + 5 轮 LLM 调用）
+**总耗时**：约 15 分钟（视频下载 + ASR 转写 + 5 轮 LLM 调用 + 图片获取 + TTS + 成片）
 
 **产出**（`out/<video_id>/` 下）：
 
@@ -287,6 +412,9 @@ uv run knowbreak run "https://www.youtube.com/watch?v=XA42XDEJcTE"
 | script | scripts.json | 13KB | 5 份原创口播脚本 |
 | storyboard | storyboards.json | 32KB | 5 份分镜表，共 85 个镜头 |
 | assets | assets.json | 20KB | 60+ 条素材建议带搜索词 |
+| images | images.json + images/ | ~4MB | 每个 topic 1 张 cover + 50+ 张竖向分镜配图 |
+| tts | tts.json + tts/ | ~3MB | 5 份完整 mp3 配音 |
+| compose | compose/<0-4>.mp4 | 1.7-3.3MB | 5 个 1080×1920 竖屏 MP4 |
 
 **查看产出**：
 
@@ -294,9 +422,131 @@ uv run knowbreak run "https://www.youtube.com/watch?v=XA42XDEJcTE"
 uv run knowbreak list                       # 所有项目及完成阶段
 uv run knowbreak show <video_id>            # 概览
 uv run knowbreak show <video_id> -s script  # 只看某阶段
+open out/<video_id>/compose/4.mp4           # 直接预览成片
 ```
 
-`storyboards.json` 可以直接对照在剪映/CapCut 里搭时间线，`assets.json` 里的搜索词直接拿到 Pexels/Pixabay/Unsplash 找素材。
+`storyboards.json` 可以直接对照在剪映/CapCut 里搭时间线，`assets.json` 里的搜索词直接拿到 Pexels/Pixabay/Unsplash 找素材。`compose/<topic>.mp4` 已经是可以直接发抖音/视频号的成品（开头封面 + 配图 + 字幕 + 配音），不需要再剪辑也可以发。
+
+## 图片获取（阶段 7）
+
+为每个分镜自动下载一张竖向免版权图。默认支持两个 provider：
+
+| Provider | 环境变量 | 适合场景 |
+|---|---|---|
+| Pexels | `PEXELS_API_KEY` / `KB_PEXELS_API_KEY` | 质感照片、人物、生活方式、通用场景 |
+| Pixabay | `PIXABAY_API_KEY` / `KB_PIXABAY_API_KEY` | 照片、插画、矢量感素材、科普图兜底 |
+
+**工作流程**：
+
+1. LLM 读 `storyboards.json`，为每个 shot 生成 2-3 个英文搜索词（具体、可视化，避免抽象词）
+2. 每个 topic 先额外生成一组封面图搜索词，封面图跟随 `KB_IMAGE_PROVIDERS` 顺序
+3. 按 `KB_IMAGE_PROVIDERS` 顺序调用 provider 搜索竖向大图
+4. 过滤掉宽高小于 1080 的，下载封面图到 `images/<topic>/cover.jpg`，分镜图到 `images/<topic>/shot_<i>.jpg`
+5. 写入 `images.json`，记录 `cover`、`shots`、`provider`、`query`、图片路径、来源 URL、作者、license
+
+**fallback**：例如 `KB_IMAGE_PROVIDERS=pexels,pixabay` 时，普通分镜和封面图都会先查 Pexels；Pexels 没结果或没 key，再查 Pixabay。某个 shot 或 cover 两个 provider 都失败时，在 compose 阶段使用纯色背景。
+
+**去重**：同一个 topic 内会跳过已经用过的 `source_url`，避免 `cover.jpg` 和多个 `shot_<i>.jpg` 都下载成同一张图。
+
+**没配 key 怎么办**：`images` 阶段不会报错，会写出空清单；`compose` 自动退化为纯色背景 + 字幕的视频（仍可发布，只是没那么好看）。
+
+**当前验证样例**：`67dca56980` 的 topic 0 已用 Pexels 跑通，封面元数据写入 `images.json`：
+
+```json
+{
+  "provider": "pexels",
+  "query": "milk vs calcium pills calcium supplement truth",
+  "image_path": "67dca56980/images/0/cover.jpg"
+}
+```
+
+**图不对题怎么办**：LLM 偶尔会把比喻当字面意思（例如"成骨细胞像建筑工人"会去搜 construction worker）。处理方式：
+
+1. 看 `images.json` 里每条记录的 `query` 字段
+2. 手动改 `storyboards.json` 里对应 shot 的 `broll` 描述，去掉比喻
+3. 删掉 `images/<topic>/shot_<i>.jpg` 重跑 `images --topic <topic_index>`
+
+## TTS 配音（阶段 8）
+
+用 `edge-tts`（微软 Edge 浏览器内置的 TTS 服务，免费、无需 API key、不限调用次数）合成中文口播。
+
+- 默认音色 `zh-CN-XiaoxiaoNeural`（女声，自然度高，适合科普）
+- 每句口播单独合成一个 mp3，再用 ffmpeg concat demuxer 拼接成 `full.mp3`
+- 实际时长由 ffprobe 探测后写入 `tts.json`，供 compose 阶段对齐画面
+
+可调项（在 `.env` 里）：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `KB_TTS_VOICE` | `zh-CN-XiaoxiaoNeural` | 完整列表见 [Azure 语音语言支持](https://learn.microsoft.com/azure/ai-services/speech-service/language-support) |
+| `KB_TTS_RATE` | `+0%` | 语速，`+10%` 加速、`-5%` 减速 |
+| `KB_TTS_VOLUME` | `+0%` | 音量 |
+
+> edge-tts 走的是公共端点，国内偶尔会连不上。失败重试即可；如果持续失败，可以换 `zh-CN-YunxiNeural`（男声）或其他音色试一下。
+
+## 自动成片（阶段 9）
+
+把 TTS 配音 + 配图 + 字幕烧录成一个 MP4。
+
+**画面结构**（开头封面 + 每句口播一张 PNG，按 TTS 实际时长拼成视频）：
+
+```
+┌─────────────────────────┐
+│      [封面图背景]        │
+│  知点拆解局              │
+│                          │
+│        大标题            │  ← 默认 2 秒，音频延迟到封面后起播
+└─────────────────────────┘
+          ↓
+┌─────────────────────────┐
+│  ▓▓▓▓ 顶部标题条 ▓▓▓▓▓▓  │  ← 半透明黑条 (170α) + 标题
+│                         │
+│                         │
+│      [配图背景]          │  ← cover-crop 填满 1080×1920
+│                         │
+│                         │
+│  ▓▓▓ 字幕正文（描边）▓▓▓ │  ← 底部半透明遮罩 (150α)
+│  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │
+│      ▓▓▓▓▓▓▓▓▓▓▓       │  ← 进度条
+└─────────────────────────┘
+```
+
+**关键参数**（在 `knowbreak/stages/compose.py` 顶部常量）：
+
+| 常量 | 默认 | 调整建议 |
+|---|---|---|
+| `VIDEO_W/H` | 1080×1920 | 抖音/视频号标准竖屏，一般不动 |
+| `BG_COLOR` | `(14,14,18)` | 无配图时的背景色 |
+| `SUBTITLE_FONT_SIZE` | 62 | 字太大改小，看不清改大 |
+| `TITLE_FONT_SIZE` | 38 | 顶部标题 |
+| `COVER_TITLE_FONT_SIZE` | 88 | 开头封面大标题 |
+| `MAX_CHARS_PER_LINE` | 16 | 中文每行字数，超出自动换行 |
+| `TOP_BAR_ALPHA` | 170 | 顶部标题条透明度，越大越暗 |
+| `BOTTOM_OVERLAY_ALPHA` | 150 | 字幕区遮罩，越大字幕越清晰 |
+
+**字体**：自动探测 PingFang → STHeiti Medium → Hiragino Sans GB → Arial Unicode 的顺序，第一个能 PIL 打开的就用。在新版 macOS 上 PingFang.ttc 在私有路径下 PIL 打不开，会自动降级到 STHeiti Medium。
+
+**FFmpeg 不需要 libass**：字幕直接 PIL 渲染成 PNG，再用 `concat demuxer + duration` 按每句实际 TTS 时长拼接，绕开了 ffmpeg 没装 libass/drawtext 的常见坑（macOS 默认 ffmpeg 就是这样）。
+
+**只跑单题**：
+
+```bash
+uv run knowbreak compose ./out/<id>/tts.json --topic 4
+```
+
+会保留 `compose.json` 里其他 topic 的记录，只重渲染指定 topic 的 MP4。改了字幕样式/字体后调试很省时间。
+
+如果只想关掉开头封面：
+
+```bash
+KB_INTRO_ENABLED=false
+```
+
+如果想调整封面停留时间：
+
+```bash
+KB_INTRO_DURATION=1.5
+```
 
 ## 项目结构
 
@@ -316,7 +566,10 @@ KnowBreak/
 │       ├── topics.py       # 3. 选题拆分
 │       ├── script.py       # 4. 口播脚本
 │       ├── storyboard.py   # 5. 画面分镜
-│       └── assets.py       # 6. 资源清单
+│       ├── assets.py       # 6. 资源清单
+│       ├── images.py       # 7. 图片获取（Pexels/Pixabay）
+│       ├── tts.py          # 8. edge-tts 配音
+│       └── compose.py      # 9. 自动成片（PIL + ffmpeg）
 ├── out/                    # 产出（按 video id 分目录）
 └── tests/
 ```
@@ -375,9 +628,45 @@ uv run knowbreak run ./inputs/source.mp4 --from script
 uv run knowbreak asr ./inputs/source.srt
 ```
 
+### TTS 报 `edge-tts` 连接失败 / 超时
+
+edge-tts 走微软公共端点，国内偶尔会连不上。先重试一次；持续失败的话换音色（例如 `KB_TTS_VOICE=zh-CN-YunxiNeural`）或挂代理。`tts` 阶段是幂等的，重跑会覆盖之前生成的 mp3。
+
+### 图片 provider 报 `401 Unauthorized` 或 `429 Too Many Requests`
+
+- 401：检查 `.env` 里的 `PEXELS_API_KEY` / `PIXABAY_API_KEY` 是否正确
+- 429：免费额度用完，等配额恢复、换 provider 顺序，或用 `--topic` 单题跑省配额
+
+### compose 报 `cannot open resource`（PIL 字体）
+
+macOS 新版本上 PingFang.ttc 在私有路径下 PIL 打不开。代码已经自动降级到 STHeiti Medium / Hiragino Sans GB，如果还是报错，确认 `/System/Library/Fonts/` 下至少有一个 `.ttc` 字体存在，或手动改 `knowbreak/stages/compose.py` 顶部的 `_FONT_CANDIDATES` 加上你能用的字体路径。
+
+### 配图不对题（图与口播内容不符）
+
+LLM 偶尔会把比喻当字面意思（例如"成骨细胞像建筑工人"会去搜 construction worker）。看 `images.json` 里 `query` 字段定位问题 shot，改 `storyboards.json` 里对应 shot 的 `broll` 描述去掉比喻，删掉 `images/<topic>/shot_<i>.jpg` 后重跑 `images --topic <i>`。
+
+### 开头封面图不够吸引人
+
+先确认 `images.json` 里的 `cover.query` 是否贴近选题。如果 query 方向对但图片不理想，直接重跑该 topic 的 `images` 阶段；如果 query 方向不对，改 `storyboards.json` 里该 topic 的标题或第一条 broll，再重跑：
+
+```bash
+uv run knowbreak images ./out/<id>/storyboards.json --topic 0
+uv run knowbreak compose ./out/<id>/tts.json --topic 0
+```
+
+### 想改字幕样式 / 字号 / 配色
+
+所有参数都在 `knowbreak/stages/compose.py` 顶部常量区。改完只重跑 compose 即可，不用重做 TTS：
+
+```bash
+uv run knowbreak compose ./out/<id>/tts.json --topic 4
+```
+
 ## 合规边界
 
 - 仅用原视频作为**知识点输入**，不搬运画面/音频片段。
 - 每期口播脚本必须为原创表达，不得整段改写原文。
 - 引用原视频片段时标注来源，单条不超过合理引用限度。
 - 不针对平台审核做规避，只对内容质量与版权负责。
+- 配图来自已配置的免版权图库 provider，需遵守对应 provider 的 license；`images.json` 里记录了每张图的 provider、作者、来源 URL 和 license，发布时如需署名可直接取用。
+- TTS 配音使用 edge-tts 公共端点，仅用于本人自有内容发布；商用场景建议接入正式 Azure Speech 服务。

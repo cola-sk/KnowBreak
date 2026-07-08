@@ -13,6 +13,8 @@ dependencies = [
     "httpx>=0.27.0",
     "yt-dlp>=2024.10.7",       # 视频下载
     "ffmpeg-python>=0.2.0",   # 音轨提取
+    "edge-tts>=7.2.8",
+    "pillow>=12.3.0",
 ]
 
 [project.optional-dependencies]

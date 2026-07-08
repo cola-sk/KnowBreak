@@ -113,6 +113,35 @@ class AssetList(BaseModel):
     assets: list[AssetSuggestion]
 
 
+class TTSLine(BaseModel):
+    """一句口播的 TTS 产出。"""
+
+    index: int
+    text: str
+    audio_path: str  # 相对 out_dir 的路径
+    duration: float  # 实际音频时长（秒）
+
+
+class TTSScript(BaseModel):
+    topic_index: int
+    title: str
+    lines: list[TTSLine]
+    full_audio_path: str  # 拼接后的完整音频
+    total_duration: float
+
+
+class TTSResult(BaseModel):
+    video_id: str
+    scripts: list[TTSScript]
+
+
+class ComposeResult(BaseModel):
+    """compose 阶段产出：每个选题一个 MP4。"""
+
+    video_id: str
+    videos: list[dict]  # [{topic_index, title, path, duration}]
+
+
 class ProjectState(BaseModel):
     """单个视频项目的完整状态，用于断点续跑。"""
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from knowbreak.config import ASRConfig, Config, LLMConfig
+from knowbreak.config import ASRConfig, Config, IntroConfig, LLMConfig, TTSConfig
 from knowbreak.stages import asr
 
 
@@ -8,6 +8,8 @@ def _config(out_dir: Path) -> Config:
     return Config(
         llm=LLMConfig(base_url="http://example.invalid/v1", api_key="test", model="test"),
         asr=ASRConfig(provider="openai", model="test"),
+        tts=TTSConfig(),
+        intro=IntroConfig(),
         out_dir=out_dir,
         project_root=out_dir.parent,
     )

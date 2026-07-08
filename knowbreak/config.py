@@ -30,13 +30,31 @@ class ASRConfig:
 
 
 @dataclass(frozen=True)
+class TTSConfig:
+    voice: str = "zh-CN-XiaoxiaoNeural"
+    rate: str = "+0%"  # 语速，如 +10% / -5%
+    volume: str = "+0%"
+
+
+@dataclass(frozen=True)
+class IntroConfig:
+    enabled: bool = True
+    duration: float = 2.0
+
+
+@dataclass(frozen=True)
 class Config:
     llm: LLMConfig
     asr: ASRConfig
+    tts: TTSConfig
+    intro: IntroConfig
     out_dir: Path
     project_root: Path
     cookies_browser: str | None = None  # yt-dlp --cookies-from-browser: chrome/safari/firefox/brave/edge
     cookies_file: Path | None = None  # yt-dlp --cookies: 优先于 cookies_browser
+    image_providers: tuple[str, ...] = ("pexels", "pixabay")
+    pexels_api_key: str | None = None
+    pixabay_api_key: str | None = None
 
     @property
     def inputs_dir(self) -> Path:
@@ -64,6 +82,26 @@ def _resolve_optional_path(v: str | None) -> Path | None:
     return p
 
 
+def _image_providers() -> tuple[str, ...]:
+    raw = _env("KB_IMAGE_PROVIDERS", "pexels,pixabay")
+    providers = tuple(p.strip().lower() for p in raw.split(",") if p.strip())
+    return providers or ("pexels", "pixabay")
+
+
+def _bool_env(key: str, default: bool) -> bool:
+    v = os.getenv(key)
+    if v is None:
+        return default
+    return v.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _float_env(key: str, default: float) -> float:
+    v = os.getenv(key)
+    if not v:
+        return default
+    return float(v)
+
+
 def load_config() -> Config:
     project_root = Path(__file__).resolve().parent.parent
     return Config(
@@ -80,8 +118,20 @@ def load_config() -> Config:
             local_model=_env("KB_ASR_LOCAL_MODEL", "medium"),
             local_device=_env("KB_ASR_LOCAL_DEVICE", "cpu"),
         ),
+        tts=TTSConfig(
+            voice=_env("KB_TTS_VOICE", "zh-CN-XiaoxiaoNeural"),
+            rate=_env("KB_TTS_RATE", "+0%"),
+            volume=_env("KB_TTS_VOLUME", "+0%"),
+        ),
+        intro=IntroConfig(
+            enabled=_bool_env("KB_INTRO_ENABLED", True),
+            duration=_float_env("KB_INTRO_DURATION", 2.0),
+        ),
         out_dir=Path(_env("KB_OUT_DIR", "./out")).resolve(),
         project_root=project_root,
         cookies_browser=_optional_env("KB_COOKIES_BROWSER"),
         cookies_file=_resolve_optional_path(_optional_env("KB_COOKIES_FILE")),
+        image_providers=_image_providers(),
+        pexels_api_key=_optional_env("PEXELS_API_KEY") or _optional_env("KB_PEXELS_API_KEY"),
+        pixabay_api_key=_optional_env("PIXABAY_API_KEY") or _optional_env("KB_PIXABAY_API_KEY"),
     )
