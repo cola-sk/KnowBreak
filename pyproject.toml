@@ -1,0 +1,39 @@
+[project]
+name = "knowbreak"
+version = "0.1.0"
+description = "知点拆解局 — 知识二创短视频生产流水线"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.50.0",          # OpenAI 兼容协议（覆盖 DeepSeek/GLM/Qwen/Kimi）
+    "pydantic>=2.9",
+    "typer>=0.12.5",
+    "rich>=13.9",
+    "python-dotenv>=1.0.1",
+    "httpx>=0.27.0",
+    "yt-dlp>=2024.10.7",       # 视频下载
+    "ffmpeg-python>=0.2.0",   # 音轨提取
+]
+
+[project.optional-dependencies]
+local-asr = [
+    "faster-whisper>=1.0.3",   # 本地 ASR 备选
+]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+knowbreak = "knowbreak.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["knowbreak"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
