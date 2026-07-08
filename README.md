@@ -29,7 +29,7 @@
    │  7. 图片获取            (images) — Pexels/Pixabay 自动下载竖向免版权图
    ▼
 每个 topic 一张开头封面图 + 每个分镜一张配图
-   │  8. TTS 配音            (tts) — edge-tts 合成每句 + 拼接完整 mp3
+   │  8. TTS 配音            (tts) — edge/OpenAI/火山/MiniMax 合成每句 + 拼接完整 mp3
    ▼
 每个选题一份完整配音
    │  9. 自动成片            (compose) — 配图背景 + 字幕 + 配音 → MP4
@@ -47,7 +47,7 @@ out/<id>/compose/<topic>.mp4
 uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
-会按顺序自动跑完 9 个阶段（asr → extract → topics → script → storyboard → assets → images → tts → compose），最终在 `out/<video_id>/compose/` 下产出 3-5 个 MP4（每个选题一个，1080×1920 竖屏，开头标题封面 + 配图背景 + 烧入字幕 + edge-tts 配音）。
+会按顺序自动跑完 9 个阶段（asr → extract → topics → script → storyboard → assets → images → tts → compose），最终在 `out/<video_id>/compose/` 下产出 3-5 个 MP4（每个选题一个，1080×1920 竖屏，开头标题封面 + 配图背景 + 烧入字幕 + TTS 配音）。
 
 默认内容风格是面向中国抖音/视频号的严肃科普：标题和开头有信息流抓力，但脚本保持克制、可信、强调误区纠偏、关键证据和可执行结论。
 
@@ -138,11 +138,13 @@ KB_ASR_BASE_URL=https://api.openai.com/v1
 KB_ASR_API_KEY=sk-...
 ```
 
-TTS 默认用 `edge-tts`（免费、无需 key），不配置也能跑。可调音色和语速：
+TTS 默认用 `edge-tts`（免费、无需 key），不配置也能跑；也可以通过 provider 切换到 OpenAI、火山引擎或 MiniMax。非 edge provider 失败后会自动切到 edge 兜底，避免整条流水线中断在配音阶段：
 
 ```bash
-KB_TTS_VOICE=zh-CN-XiaoxiaoNeural  # 默认女声，详见 .env.example
-KB_TTS_RATE=+0%                     # +10% 加速，-5% 减速
+KB_TTS_PROVIDER=edge       # edge | openai | volcengine | minimax
+KB_TTS_SPEED=1.0           # 通用语速；edge 仍优先用 KB_TTS_RATE
+KB_TTS_VOICE=zh-CN-XiaoxiaoNeural
+KB_TTS_RATE=+0%
 ```
 
 配图 provider 可选。默认按 `KB_IMAGE_PROVIDERS=pexels,pixabay` 的顺序尝试，某个 provider 没有 key 会自动跳过；两个 key 都不配置时，`images` 阶段只写空清单，`compose` 退化为纯色背景 + 字幕。
@@ -513,21 +515,65 @@ open out/<video_id>/compose/4.mp4           # 直接预览成片
 
 ## TTS 配音（阶段 8）
 
-用 `edge-tts`（微软 Edge 浏览器内置的 TTS 服务，免费、无需 API key、不限调用次数）合成中文口播。
+`tts` 阶段把每句口播合成为单独 mp3，再用 ffmpeg concat demuxer 拼成每个选题的 `full.mp3`。实际时长由 ffprobe 探测后写入 `tts.json`，供 compose 阶段对齐画面。
 
-- 默认音色 `zh-CN-XiaoxiaoNeural`（女声，自然度高，适合科普）
-- 每句口播单独合成一个 mp3，再用 ffmpeg concat demuxer 拼接成 `full.mp3`
-- 实际时长由 ffprobe 探测后写入 `tts.json`，供 compose 阶段对齐画面
+支持的 provider：
 
-可调项（在 `.env` 里）：
-
-| 变量 | 默认 | 说明 |
+| Provider | `KB_TTS_PROVIDER` | 说明 |
 |---|---|---|
-| `KB_TTS_VOICE` | `zh-CN-XiaoxiaoNeural` | 完整列表见 [Azure 语音语言支持](https://learn.microsoft.com/azure/ai-services/speech-service/language-support) |
-| `KB_TTS_RATE` | `+0%` | 语速，`+10%` 加速、`-5%` 减速 |
-| `KB_TTS_VOLUME` | `+0%` | 音量 |
+| edge-tts | `edge` | 默认，免费、无需 key；质量够用但口播节奏偏机械 |
+| OpenAI TTS | `openai` | 接入简单，适合做质量对照 |
+| 火山引擎 / 豆包大模型语音合成 | `volcengine` | 默认使用 `seed-tts-2.0` 单向流式接口，中文短视频口播优先试这个 |
+| MiniMax Speech | `minimax` | 中文自然度和多音色可作为重点候选 |
 
-> edge-tts 走的是公共端点，国内偶尔会连不上。失败重试即可；如果持续失败，可以换 `zh-CN-YunxiNeural`（男声）或其他音色试一下。
+通用配置：
+
+```bash
+KB_TTS_PROVIDER=edge
+KB_TTS_TIMEOUT=60
+KB_TTS_SPEED=1.0
+```
+
+edge-tts 配置：
+
+```bash
+KB_TTS_VOICE=zh-CN-XiaoxiaoNeural
+KB_TTS_RATE=+0%
+KB_TTS_VOLUME=+0%
+```
+
+OpenAI TTS 配置：
+
+```bash
+KB_TTS_PROVIDER=openai
+KB_OPENAI_TTS_API_KEY=sk-...
+KB_OPENAI_TTS_BASE_URL=https://api.openai.com/v1
+KB_OPENAI_TTS_MODEL=gpt-4o-mini-tts
+KB_OPENAI_TTS_VOICE=alloy
+```
+
+火山引擎 / 豆包大模型语音合成配置：
+
+```bash
+KB_TTS_PROVIDER=volcengine
+KB_VOLC_TTS_API_KEY=...
+KB_VOLC_TTS_MODEL=seed-tts-2.0
+KB_VOLC_TTS_URL=https://openspeech.bytedance.com/api/v3/tts/unidirectional
+KB_VOLC_TTS_SPEAKER=zh_female_xiaohe_uranus_bigtts
+KB_VOLC_TTS_CONTEXT=自然、清晰、克制的中文科普男声，语速适中，不要背景音乐和音效。
+```
+
+MiniMax Speech 配置：
+
+```bash
+KB_TTS_PROVIDER=minimax
+KB_MINIMAX_TTS_API_KEY=...
+KB_MINIMAX_TTS_GROUP_ID=...
+KB_MINIMAX_TTS_MODEL=speech-02-turbo
+KB_MINIMAX_TTS_VOICE_ID=Chinese (Mandarin)_News_Anchor
+```
+
+非 edge provider 失败时会打印错误并切到 edge 兜底，后续句子也会继续使用 edge，避免同一个选题里反复失败。
 
 ## 自动成片（阶段 9）
 
@@ -613,7 +659,7 @@ KnowBreak/
 │       ├── storyboard.py   # 5. 画面分镜
 │       ├── assets.py       # 6. 资源清单
 │       ├── images.py       # 7. 图片获取（Pexels/Pixabay）
-│       ├── tts.py          # 8. edge-tts 配音
+│       ├── tts.py          # 8. 多 provider TTS 配音
 │       └── compose.py      # 9. 自动成片（PIL + ffmpeg）
 ├── out/                    # 产出（按 video id 分目录）
 └── tests/
@@ -673,9 +719,9 @@ uv run knowbreak run ./inputs/source.mp4 --from script
 uv run knowbreak asr ./inputs/source.srt
 ```
 
-### TTS 报 `edge-tts` 连接失败 / 超时
+### TTS provider 连接失败 / 超时
 
-edge-tts 走微软公共端点，国内偶尔会连不上。先重试一次；持续失败的话换音色（例如 `KB_TTS_VOICE=zh-CN-YunxiNeural`）或挂代理。`tts` 阶段是幂等的，重跑会覆盖之前生成的 mp3。
+OpenAI、火山、MiniMax 任一 provider 失败时，代码会自动切到 edge 兜底并继续生成后续句子。edge-tts 走微软公共端点，国内偶尔也会连不上；持续失败时可以换音色（例如 `KB_TTS_VOICE=zh-CN-YunxiNeural`）、挂代理，或临时改回已验证可用的商业 provider。火山新版优先用 `KB_TTS_PROVIDER=volcengine` + `KB_VOLC_TTS_MODEL=seed-tts-2.0`。`tts` 阶段是幂等的，重跑会覆盖之前生成的 mp3。
 
 ### LLM 阶段超时 / 返回 JSON 解析失败
 
@@ -718,4 +764,4 @@ uv run knowbreak compose ./out/<id>/tts.json --topic 4
 - 引用原视频片段时标注来源，单条不超过合理引用限度。
 - 不针对平台审核做规避，只对内容质量与版权负责。
 - 配图来自已配置的免版权图库 provider，需遵守对应 provider 的 license；`images.json` 里记录了每张图的 provider、作者、来源 URL 和 license，发布时如需署名可直接取用。
-- TTS 配音使用 edge-tts 公共端点，仅用于本人自有内容发布；商用场景建议接入正式 Azure Speech 服务。
+- TTS 配音可使用 edge-tts、OpenAI、火山引擎或 MiniMax；商用发布前需确认所选 provider 的授权范围、音色使用条款和署名要求。

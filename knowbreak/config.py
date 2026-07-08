@@ -32,9 +32,30 @@ class ASRConfig:
 
 @dataclass(frozen=True)
 class TTSConfig:
+    provider: str = "edge"
     voice: str = "zh-CN-XiaoxiaoNeural"
     rate: str = "+0%"  # 语速，如 +10% / -5%
     volume: str = "+0%"
+    speed: float = 1.0
+    timeout: float = 60.0
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini-tts"
+    openai_voice: str = "alloy"
+    volc_api_key: str | None = None
+    volc_model: str = "seed-tts-2.0"
+    volc_url: str = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
+    volc_speaker: str = "zh_female_xiaohe_uranus_bigtts"
+    volc_context: str = "自然、清晰、克制的中文科普男声，语速适中，不要背景音乐和音效。"
+    volc_sample_rate: int = 24000
+    volc_speech_rate: int = 0
+    volc_loudness_rate: int = 0
+    volc_pitch_rate: int = 0
+    minimax_api_key: str | None = None
+    minimax_group_id: str | None = None
+    minimax_model: str = "speech-02-turbo"
+    minimax_voice_id: str = "Chinese (Mandarin)_News_Anchor"
+    minimax_url: str = "https://api.minimaxi.com/v1/t2a_v2"
 
 
 @dataclass(frozen=True)
@@ -103,6 +124,16 @@ def _float_env(key: str, default: float) -> float:
     return float(v)
 
 
+def _tts_speed() -> float:
+    raw_speed = os.getenv("KB_TTS_SPEED")
+    if raw_speed:
+        return float(raw_speed)
+    raw_rate = os.getenv("KB_TTS_RATE", "+0%").strip()
+    if raw_rate.endswith("%"):
+        return 1.0 + float(raw_rate[:-1]) / 100
+    return 1.0
+
+
 def load_config() -> Config:
     project_root = Path(__file__).resolve().parent.parent
     return Config(
@@ -121,9 +152,37 @@ def load_config() -> Config:
             local_device=_env("KB_ASR_LOCAL_DEVICE", "cpu"),
         ),
         tts=TTSConfig(
+            provider=_env("KB_TTS_PROVIDER", "edge").lower(),
             voice=_env("KB_TTS_VOICE", "zh-CN-XiaoxiaoNeural"),
             rate=_env("KB_TTS_RATE", "+0%"),
             volume=_env("KB_TTS_VOLUME", "+0%"),
+            speed=_tts_speed(),
+            timeout=_float_env("KB_TTS_TIMEOUT", 60.0),
+            openai_api_key=_optional_env("KB_OPENAI_TTS_API_KEY")
+            or _optional_env("OPENAI_API_KEY"),
+            openai_base_url=_env("KB_OPENAI_TTS_BASE_URL", "https://api.openai.com/v1"),
+            openai_model=_env("KB_OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
+            openai_voice=_env("KB_OPENAI_TTS_VOICE", "alloy"),
+            volc_api_key=_optional_env("KB_VOLC_TTS_API_KEY"),
+            volc_model=_env("KB_VOLC_TTS_MODEL", "seed-tts-2.0"),
+            volc_url=_env(
+                "KB_VOLC_TTS_URL",
+                "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+            ),
+            volc_speaker=_env("KB_VOLC_TTS_SPEAKER", "zh_female_xiaohe_uranus_bigtts"),
+            volc_context=_env(
+                "KB_VOLC_TTS_CONTEXT",
+                "自然、清晰、克制的中文科普男声，语速适中，不要背景音乐和音效。",
+            ),
+            volc_sample_rate=int(_env("KB_VOLC_TTS_SAMPLE_RATE", "24000")),
+            volc_speech_rate=int(_env("KB_VOLC_TTS_SPEECH_RATE", "0")),
+            volc_loudness_rate=int(_env("KB_VOLC_TTS_LOUDNESS_RATE", "0")),
+            volc_pitch_rate=int(_env("KB_VOLC_TTS_PITCH_RATE", "0")),
+            minimax_api_key=_optional_env("KB_MINIMAX_TTS_API_KEY"),
+            minimax_group_id=_optional_env("KB_MINIMAX_TTS_GROUP_ID"),
+            minimax_model=_env("KB_MINIMAX_TTS_MODEL", "speech-02-turbo"),
+            minimax_voice_id=_env("KB_MINIMAX_TTS_VOICE_ID", "Chinese (Mandarin)_News_Anchor"),
+            minimax_url=_env("KB_MINIMAX_TTS_URL", "https://api.minimaxi.com/v1/t2a_v2"),
         ),
         intro=IntroConfig(
             enabled=_bool_env("KB_INTRO_ENABLED", True),
