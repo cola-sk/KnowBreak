@@ -37,10 +37,10 @@ def run(
 def asr_cmd(
     source: str = typer.Argument(..., help="视频 URL 或本地文件路径"),
 ):
-    """阶段 1：语音转写。"""
+    """阶段 1：字幕优先，失败后语音转写。"""
     cfg = load_config()
     t = asr_stage.run(source, cfg)
-    console.print(f"[green]✓[/] {len(t.segments)} 段, duration={t.duration:.1f}s")
+    console.print(f"[green]✓[/] {t.method}, {len(t.segments)} 段, duration={t.duration:.1f}s")
 
 
 @app.command(name="extract")

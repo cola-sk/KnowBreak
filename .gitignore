@@ -33,3 +33,5 @@ inputs/
 .ruff_cache/
 .coverage
 htmlcov/
+cookies.txt
+.npmrc

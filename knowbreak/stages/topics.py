@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from ..config import Config
 from ..llm import LLM
-from ..models import Knowledge, Topics
+from ..models import Knowledge, Topic, Topics
 from ._common import project_dir, save_json
 
 
@@ -55,7 +55,7 @@ def run(knowledge_path: Path, cfg: Config) -> Topics:
     topics = Topics(
         video_id=knowledge.video_id,
         topics=[
-            t.model_copy(update={"index": i})
+            Topic(index=i, **t.model_dump())
             for i, t in enumerate(schema.topics)
         ],
     )

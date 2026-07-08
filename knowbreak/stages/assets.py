@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from ..config import Config
 from ..llm import LLM
 from ..models import AssetList, AssetSuggestion, Storyboards
-from ._common import project_dir, save_json
+from ._common import project_dir
 import json
 
 

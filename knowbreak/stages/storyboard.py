@@ -45,7 +45,7 @@ def run(scripts_path: Path, cfg: Config) -> Storyboards:
     llm = LLM(cfg.llm)
     boards: list[Storyboard] = []
     for script in scripts.scripts:
-        narration_blob = "\n".join(f"- {l.text}" for l in script.lines)
+        narration_blob = "\n".join(f"- {line.text}" for line in script.lines)
         schema = llm.chat_json(
             _SYSTEM,
             f"选题标题：{script.title}\n口播内容（按行）：\n{narration_blob}\n总时长目标：{script.total_duration}s\n",

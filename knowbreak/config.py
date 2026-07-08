@@ -23,6 +23,8 @@ class LLMConfig:
 class ASRConfig:
     provider: str  # "openai" | "local"
     model: str
+    base_url: str | None = None
+    api_key: str | None = None
     local_model: str = "medium"
     local_device: str = "cpu"
 
@@ -33,6 +35,8 @@ class Config:
     asr: ASRConfig
     out_dir: Path
     project_root: Path
+    cookies_browser: str | None = None  # yt-dlp --cookies-from-browser: chrome/safari/firefox/brave/edge
+    cookies_file: Path | None = None  # yt-dlp --cookies: 优先于 cookies_browser
 
     @property
     def inputs_dir(self) -> Path:
@@ -46,6 +50,20 @@ def _env(key: str, default: str | None = None) -> str:
     return v
 
 
+def _optional_env(key: str) -> str | None:
+    v = os.getenv(key)
+    return v if v else None
+
+
+def _resolve_optional_path(v: str | None) -> Path | None:
+    if not v:
+        return None
+    p = Path(v)
+    if not p.is_absolute():
+        p = (Path(__file__).resolve().parent.parent / p).resolve()
+    return p
+
+
 def load_config() -> Config:
     project_root = Path(__file__).resolve().parent.parent
     return Config(
@@ -57,9 +75,13 @@ def load_config() -> Config:
         asr=ASRConfig(
             provider=_env("KB_ASR_PROVIDER", "openai"),
             model=_env("KB_ASR_MODEL", "whisper-1"),
+            base_url=_optional_env("KB_ASR_BASE_URL"),
+            api_key=_optional_env("KB_ASR_API_KEY"),
             local_model=_env("KB_ASR_LOCAL_MODEL", "medium"),
             local_device=_env("KB_ASR_LOCAL_DEVICE", "cpu"),
         ),
         out_dir=Path(_env("KB_OUT_DIR", "./out")).resolve(),
         project_root=project_root,
+        cookies_browser=_optional_env("KB_COOKIES_BROWSER"),
+        cookies_file=_resolve_optional_path(_optional_env("KB_COOKIES_FILE")),
     )

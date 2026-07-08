@@ -23,7 +23,7 @@ def run_full(source: str, cfg: Config, start_from: str | None = None) -> str:
     start_idx = 0 if start_from is None else STAGES.index(start_from)
 
     if start_idx <= 0:
-        console.print(f"[cyan]▸ 阶段 1/6 ASR 转写[/]: {source}")
+        console.print(f"[cyan]▸ 阶段 1/6 字幕/ASR 转写[/]: {source}")
         asr.run(source, cfg)
     if start_idx <= 1:
         console.print("[cyan]▸ 阶段 2/6 知识点提取[/]")

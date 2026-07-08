@@ -63,7 +63,10 @@ def run(topics_path: Path, cfg: Config) -> Scripts:
             Script(
                 topic_index=topic.index,
                 title=topic.title,
-                lines=[ScriptLine(text=l.text, estimated_seconds=l.estimated_seconds) for l in schema.lines],
+                lines=[
+                    ScriptLine(text=line.text, estimated_seconds=line.estimated_seconds)
+                    for line in schema.lines
+                ],
                 total_duration=total,
                 hashtags=schema.hashtags,
             )

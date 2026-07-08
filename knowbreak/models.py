@@ -19,6 +19,8 @@ class Transcript(BaseModel):
     source: str  # 原始 URL 或文件路径
     duration: float
     language: str | None = None
+    method: Literal["subtitle", "asr"] = "asr"
+    transcript_source: str | None = None
     segments: list[TranscriptSegment]
 
 
