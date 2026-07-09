@@ -19,13 +19,17 @@ class LLM:
         self.client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key, timeout=cfg.timeout)
 
     def chat(self, system: str, user: str, *, temperature: float | None = None) -> str:
+        kwargs = {}
+        resolved_temperature = self.cfg.temperature if temperature is None else temperature
+        if resolved_temperature is not None:
+            kwargs["temperature"] = resolved_temperature
         resp = self.client.chat.completions.create(
             model=self.cfg.model,
-            temperature=self.cfg.temperature if temperature is None else temperature,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            **kwargs,
         )
         return resp.choices[0].message.content or ""
 

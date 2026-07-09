@@ -12,6 +12,8 @@
 - 必须英文、具体、可视化
 - 描述该 shot 真实想表达的概念，不是比喻本身
 - 2-3 个词，便于在图库里找到匹配图
-- 另外给出 cover_keywords，用于视频开头封面图，要更有冲击力、适合做点击封面
+- 另外给出 cover_keywords，用于视频开头封面图，要更有冲击力、适合做点击封面。
+- cover_keywords 必须优先体现选题标题和前 1-2 个分镜里的具体主体，不能只给抽象概念。比如标题涉及“葫芦娃/中国动画/童年动画”，封面关键词应围绕 seven colorful gourds、Chinese cartoon inspired、grandfather silhouette、vine、snake demon silhouette、math probability，而不是只写 probability、strategy、question mark。
+- 遇到知名影视/动画/IP 时，不要搜索原片截图或角色复制；使用“inspired / symbolic / silhouette / colorful object icons”等非侵权表达，让封面和主题有关但不搬运原作品画面。
 
 输出 JSON：{"cover_keywords": ["milk calcium bone health"], "shots": [{"index": 0, "keywords": ["bone density", "skeleton illustration"]}]}

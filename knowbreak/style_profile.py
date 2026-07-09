@@ -28,7 +28,7 @@ class GenerationProfile(BaseModel):
     extract_temperature: float | None = None
     topics_temperature: float | None = None
     rewrite_temperature: float | None = None
-    script_temperature: float | None = 0.8
+    script_temperature: float | None = None
     storyboard_temperature: float | None = None
     assets_temperature: float | None = None
     images_temperature: float | None = None
@@ -47,6 +47,14 @@ class TopicsProfile(BaseModel):
     count: int = 1
     target_duration_min: int = 60
     target_duration_max: int = 90
+
+
+class RewriteProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_duration_min: int = 60
+    target_duration_max: int = 90
+    spoken_chars_per_second: float = 5.0
 
 
 class ComposeProfile(BaseModel):
@@ -95,6 +103,7 @@ class StyleProfile(BaseModel):
     generation: GenerationProfile = Field(default_factory=GenerationProfile)
     intro: IntroProfile = Field(default_factory=IntroProfile)
     topics: TopicsProfile = Field(default_factory=TopicsProfile)
+    rewrite: RewriteProfile = Field(default_factory=RewriteProfile)
     compose: ComposeProfile = Field(default_factory=ComposeProfile)
 
     @property

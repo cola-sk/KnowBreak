@@ -46,11 +46,11 @@ out/<id>/compose/<topic>.mp4
 | 1. `asr` 字幕/转写 | 视频 URL、本地视频、`.srt` / `.vtt` / `.ass` 字幕 | `yt-dlp`、`ffmpeg`、OpenAI 兼容 ASR 或本地 `faster-whisper` | 不使用 profile prompt；ASR provider 在 `.env` 配置 | 优先使用本地同名字幕或 URL 自动字幕；没有字幕时下载/抽取音频为 16kHz 单声道 WAV，再走 ASR。OpenAI 兼容 ASR 会先尝试带 segment 时间戳，失败后回退为纯文本整段 segment。 | `audio.wav`、`transcript.json`、字幕文件；URL 源视频缓存为根目录 `source.mp4` | 版本模式下 `transcript.json` / `audio.wav` 放在版本目录；只有 `source.mp4` 可跨版本共享 |
 | 2. `extract` 知识点提取 | `transcript.json` | LLM JSON 结构化输出 | `prompts/extract.md` 作为 system prompt，在逐字稿渲染成时间戳文本后调用；定义知识点数量、字段、摘要和原文依据要求 | 把逐字稿渲染为带时间戳文本，要求 LLM 提炼 5-12 个知识点，每个知识点包含摘要、核心论断、示例和原文依据。 | `knowledge.json` | 版本化产物；不同 profile / prompt 下必须重新生成，不跨版本共享 |
 | 3. `topics` 选题拆分 | `knowledge.json` | LLM JSON 结构化输出 | `prompts/topics.md` 作为 system prompt，在知识点提取完成后调用；`profile.toml` 的 `[topics]` 定义选题数量和目标时长范围 | 基于知识点生成指定数量的独立短视频选题；当前严肃科普 profile 默认只生成 1 个 topic，强调抓人标题、3 秒钩子、误区纠偏、证据和可执行结论。 | `topics.json` | 版本化产物，放在 `out/<video_id>/<version>/` |
-| 3b. `rewrite` 按原结构洗稿 | `transcript.json` | LLM JSON 结构化输出 | `prompts/rewrite.md` 作为 system prompt；只在 `rewrite_same_structure` workflow 中调用 | 不重新提炼知识点、不拆选题，保持原视频结构、知识点顺序和核心论证，改写成 1 条原创口播脚本。 | `scripts.json` | 版本化产物；与 `script` 二选一产出同一个脚本文件 |
+| 3b. `rewrite` 按原结构洗稿 | `transcript.json` | LLM JSON 结构化输出 | `prompts/rewrite.md` 作为 system prompt；`profile.toml` 的 `[rewrite]` 定义目标时长范围和口播字速；只在 `rewrite_same_structure` workflow 中调用 | 不重新提炼知识点、不拆选题，保持原视频结构、知识点顺序和核心论证，同时按目标时长和建议字数压缩重复铺垫、重复例子，改写成 1 条原创短视频口播脚本。输出明显超过目标上限时中断，不继续生成低质量后续产物。 | `scripts.json` | 版本化产物；与 `script` 二选一产出同一个脚本文件 |
 | 4. `script` 口播脚本 | `topics.json` + `knowledge.json` | LLM JSON 结构化输出 | `prompts/script.md` 作为 system prompt，对每个 topic 单独调用；定义口播结构、语气、禁用流量词、估算时长和 hashtag。严肃科普风格允许前 3 句以内适度卖关子，但要服务事实解释。`generation.script_temperature` 控制生成随机性 | 每个 topic 单独生成原创逐字口播脚本；按“强钩子 → 适度悬念 → 问题说明 → 误区/现象 → 数据/机制 → 行动建议”推进，并给出每句估算时长和 hashtag。 | `scripts.json` | 版本化产物 |
 | 5. `storyboard` 画面分镜 | `scripts.json` | LLM JSON 结构化输出 | `prompts/storyboard.md` 作为 system prompt，在脚本生成后调用；定义 shot 字段、画面风格、字幕密度和免版权画面要求。前 3 个 shot 以内可保留“常见认知 vs 真实原因”的悬念，但第 3 个 shot 内要进入事实解释 | 把口播拆成竖屏分镜，每个 shot 包含 narration、visual、broll、subtitle、duration；画面风格偏严肃科普的信息图、真人讲解、实拍和机制示意。LLM 超时或 JSON 异常时中断，不自动生成低质量兜底分镜。 | `storyboards.json` | 版本化产物 |
 | 6. `assets` 资源清单 | `storyboards.json` | LLM JSON 结构化输出 | `prompts/assets.md` 作为 system prompt，在分镜完成后调用；定义资源类型、描述、搜索关键词和版权约束 | 根据每个 topic 的分镜摘要生成 5-12 条资源建议，包含资源类型、具体描述、搜索关键词和可选来源 URL；用于人工精修或后续素材搜索。 | `assets.json` | 版本化产物 |
-| 7. `images` 自动配图 | `storyboards.json` | LLM 关键词生成、Pexels API、Pixabay API、HTTP 下载 | `prompts/images.md` 作为 system prompt，在请求图库前调用；把分镜转成英文 `cover_keywords` 和每个 shot 的搜索词，避免把比喻当字面素材 | 先让 LLM 为封面和每个 shot 生成英文搜索词，再按 `KB_IMAGE_PROVIDERS` 顺序查 Pexels/Pixabay，下载竖向大图；同 topic 内按 `source_url` 去重。关键词 LLM 失败会中断，provider 没结果才 fallback 到下一个图库。 | `images.json`、`images/<topic>/cover.jpg`、`images/<topic>/shot_<i>.jpg` | 版本化产物 |
+| 7. `images` 自动配图 | `storyboards.json` | LLM 关键词生成、Pexels API、Pixabay API、HTTP 下载 | `prompts/images.md` 作为 system prompt，在请求图库前调用；把分镜转成英文 `cover_keywords` 和每个 shot 的搜索词，避免把比喻当字面素材；封面关键词优先体现片名和前几个分镜的具体主体 | 先让 LLM 为封面和每个 shot 生成英文搜索词，再按 `KB_IMAGE_PROVIDERS` 顺序查 Pexels/Pixabay，下载竖向大图；同 topic 内按 `source_url` 去重。遇到命名动画/IP 题材时，封面走符号化/剪影/物件化关键词，和主题相关但不搬运原片截图。关键词 LLM 失败会中断，provider 没结果才 fallback 到下一个图库。 | `images.json`、`images/<topic>/cover.jpg`、`images/<topic>/shot_<i>.jpg` | 版本化产物 |
 | 8. `tts` 配音 | `scripts.json` | TTS provider：`edge` / `openai` / `volcengine` / `volcengine_legacy` / `minimax`、`ffmpeg`、`ffprobe` | 不使用 profile prompt；TTS provider、音色、语速和模型在 `.env` 配置 | 逐句合成 `line_<i>.mp3`，探测每句真实时长，再用 ffmpeg concat 拼成每个 topic 的 `full.mp3`。非 edge provider 失败时切到 edge 继续，避免整条流水线卡死。当前火山新版 provider 按 `seed-tts-2.0` 单向流式接口解析音频 chunk。 | `tts.json`、`tts/<topic>/line_<i>.mp3`、`tts/<topic>/full.mp3` | 版本化产物 |
 | 9. `compose` 自动成片 | `tts.json` + `images.json` | PIL、系统字体、`ffmpeg`、`ffprobe` | 不使用 LLM prompt；读取 `profile.toml` 的 `[compose]`，控制品牌字、尺寸、颜色、字号、遮罩、字幕/封面位置和进度条 | 用 PIL 渲染开头标题封面、每句字幕 PNG、顶部标题条、底部进度条；按 TTS 实际时长生成 1080×1920 竖屏视频，音频延迟到封面结束后开始。没有图片时退化为纯色背景。 | `compose.json`、`compose/<topic>.mp4` | 版本化产物 |
 
@@ -70,7 +70,7 @@ uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID"
 uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --workflow rewrite_same_structure
 ```
 
-这个 workflow 会跑 `asr → rewrite → storyboard → images → tts → compose`，跳过 `extract`、`topics` 和 `script`，直接按原逐字稿结构改写成 1 条原创口播脚本。每次运行都会在产出目录写入 `workflow_plan.json`，记录本次调用了哪些能力、对应 prompt、输入和输出。
+这个 workflow 会跑 `asr → rewrite → storyboard → images → tts → compose`，跳过 `extract`、`topics` 和 `script`，直接按原逐字稿结构改写成 1 条原创短视频口播脚本。改写时会读取 profile 的 `[rewrite] target_duration_min/max` 和 `spoken_chars_per_second`，默认按 60-90 秒、约 5 字/秒约束正文长度；每次运行都会在产出目录写入 `workflow_plan.json`，记录本次调用了哪些能力、对应 prompt、输入和输出。
 
 默认内容风格是面向中国抖音/视频号的严肃科普：标题和开头有信息流抓力，但脚本保持克制、可信、强调误区纠偏、关键证据和可执行结论。
 
@@ -234,6 +234,7 @@ profiles/
 | `generation` | 每个 LLM 阶段的生成随机性 | `script_temperature`、`topics_temperature`、`images_temperature` |
 | `intro` | 开头标题封面是否启用、停留时长 | `enabled`、`duration` |
 | `topics` | 生成几个短视频选题、每条目标时长范围 | `count`、`target_duration_min`、`target_duration_max` |
+| `rewrite` | 洗稿 workflow 的单条视频目标时长和字数控制 | `target_duration_min`、`target_duration_max`、`spoken_chars_per_second` |
 | `compose` | 最终 MP4 的视觉样式 | 品牌字、尺寸、字体大小、字幕每行字数、遮罩透明度、封面/字幕纵向位置、进度条颜色 |
 
 配置边界：
@@ -352,6 +353,7 @@ uv run knowbreak show <id> --version v002 --stage script
 | 只改分镜配图 | `uv run knowbreak images ./out/<id>/<version>/storyboards.json --topic 0`，然后 `compose --topic 0` |
 | 只改成片视觉参数 `[compose]` | `uv run knowbreak compose ./out/<id>/<version>/tts.json --topic 0` |
 | 只改 TTS provider / 音色 | `uv run knowbreak tts ./out/<id>/<version>/scripts.json`，然后 `compose` |
+| 改 `prompts/rewrite.md` 或 `[rewrite]` 目标时长 | `rewrite → storyboard → images → tts → compose` |
 | 改 `prompts/script.md` | `script → storyboard → images → tts → compose` |
 | 改 `prompts/storyboard.md` | `storyboard → assets/images → compose`，如果口播没变通常不用重跑 TTS |
 | 改 `prompts/images.md` | `images → compose` |
@@ -589,7 +591,7 @@ open out/<video_id>/compose/4.mp4           # 直接预览成片
 **工作流程**：
 
 1. LLM 读 `storyboards.json`，为每个 shot 生成 2-3 个英文搜索词（具体、可视化，避免抽象词）
-2. 每个 topic 先额外生成一组封面图搜索词，封面图跟随 `KB_IMAGE_PROVIDERS` 顺序
+2. 每个 topic 先额外生成一组封面图搜索词，封面图跟随 `KB_IMAGE_PROVIDERS` 顺序；封面关键词会优先贴合片名/前几个分镜里的具体主体
 3. 按 `KB_IMAGE_PROVIDERS` 顺序调用 provider 搜索竖向大图
 4. 过滤掉宽高小于 1080 的，下载封面图到 `images/<topic>/cover.jpg`，分镜图到 `images/<topic>/shot_<i>.jpg`
 5. 写入 `images.json`，记录 `cover`、`shots`、`provider`、`query`、图片路径、来源 URL、作者、license
@@ -597,6 +599,8 @@ open out/<video_id>/compose/4.mp4           # 直接预览成片
 **provider fallback**：例如 `KB_IMAGE_PROVIDERS=pexels,pixabay` 时，普通分镜和封面图都会先查 Pexels；Pexels 没结果或没 key，再查 Pixabay。图片关键词 LLM 超时/失败时会中断，避免下载一批不对题图片。某个 shot 或 cover 两个 provider 都搜不到时，在 compose 阶段使用纯色背景。
 
 **去重**：同一个 topic 内会跳过已经用过的 `source_url`，避免 `cover.jpg` 和多个 `shot_<i>.jpg` 都下载成同一张图。
+
+**命名动画/IP 题材**：封面不直接搜索原片截图或复制角色，而是用“符号化物件、剪影、风格化图标、相关场景元素”表达主题。例如“葫芦娃”题材会优先尝试七个彩色葫芦、藤蔓、老人/蛇影、概率模型等元素。
 
 **没配 key 怎么办**：`images` 阶段不会报错，会写出空清单；`compose` 自动退化为纯色背景 + 字幕的视频（仍可发布，只是没那么好看）。
 

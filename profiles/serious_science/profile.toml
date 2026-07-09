@@ -10,10 +10,6 @@ storyboard_system = "prompts/storyboard.md"
 assets_system = "prompts/assets.md"
 images_system = "prompts/images.md"
 
-[generation]
-rewrite_temperature = 0.7
-script_temperature = 0.8
-
 [intro]
 enabled = true
 duration = 2.0
@@ -22,6 +18,11 @@ duration = 2.0
 count = 1
 target_duration_min = 60
 target_duration_max = 90
+
+[rewrite]
+target_duration_min = 60
+target_duration_max = 90
+spoken_chars_per_second = 5.0
 
 [compose]
 brand = "知点拆解局"

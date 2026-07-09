@@ -14,12 +14,15 @@ def test_load_builtin_style_profile() -> None:
     assert profile.base_dir == project_root / "profiles" / "serious_science"
     assert "严肃科普" in profile.description
     assert "抖音严肃科普账号" in profile.prompts.script_system
-    assert profile.generation.script_temperature == 0.8
+    assert profile.generation.script_temperature is None
     assert profile.intro.enabled is True
     assert profile.intro.duration == 2.0
     assert profile.topics.count == 1
     assert profile.topics.target_duration_min == 60
     assert profile.topics.target_duration_max == 90
+    assert profile.rewrite.target_duration_min == 60
+    assert profile.rewrite.target_duration_max == 90
+    assert profile.rewrite.spoken_chars_per_second == 5.0
     assert profile.compose.brand == "知点拆解局"
     assert profile.compose.video_w == 1080
 
