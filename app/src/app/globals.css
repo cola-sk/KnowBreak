@@ -1,0 +1,136 @@
+:root {
+  --bg: #f3efe7;
+  --panel: #fffdf9;
+  --ink: #1f1d1a;
+  --muted: #6e675d;
+  --line: #d6c7b3;
+  --brand: #1d6f5f;
+  --accent: #d97706;
+  --danger: #b42318;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at 20% 10%, #fbf8f1 0%, var(--bg) 55%);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(60, 35, 0, 0.06);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--brand);
+  color: #fff;
+}
+
+button.secondary {
+  background: #f4f0e8;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+button.warn {
+  background: var(--accent);
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: #fff;
+}
+
+.badge.approved {
+  color: #0f5132;
+  border-color: #84d1a8;
+  background: #ebfff3;
+}
+
+.badge.rejected {
+  color: #7a271a;
+  border-color: #f2b8a9;
+  background: #fff1ec;
+}
+
+.badge.in_review {
+  color: #7a5d00;
+  border-color: #f1d58f;
+  background: #fff8df;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 12px;
+  }
+}

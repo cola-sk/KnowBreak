@@ -1,0 +1,65 @@
+id = "serious_science_review"
+description = "严肃科普提炼（含人工审核闸门）：脚本/分镜/图片分别审核后再继续。"
+
+steps = [
+  "asr",
+  "extract",
+  "topics",
+  "script",
+  "script_review",
+  "storyboard",
+  "storyboard_review",
+  "images",
+  "image_review",
+  "tts",
+  "compose",
+]
+
+[capabilities.asr]
+inputs = ["source"]
+outputs = ["transcript.json", "audio.wav"]
+
+[capabilities.extract]
+prompt = "prompts/extract.md"
+inputs = ["transcript.json"]
+outputs = ["knowledge.json"]
+
+[capabilities.topics]
+prompt = "prompts/topics.md"
+inputs = ["knowledge.json"]
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/script.md"
+inputs = ["topics.json", "knowledge.json"]
+outputs = ["scripts.json"]
+
+[capabilities.script_review]
+inputs = ["scripts.json"]
+outputs = ["reviews/script_review.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.storyboard_review]
+inputs = ["storyboards.json"]
+outputs = ["reviews/storyboard_review.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.image_review]
+inputs = ["images.json"]
+outputs = ["reviews/image_review.json"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

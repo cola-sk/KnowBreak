@@ -9,7 +9,20 @@ from typing import Literal
 from rich.console import Console
 
 from .config import Config
-from .stages import asr, extract, topics, script, storyboard, assets, images, tts, compose, rewrite, topic_seed
+from .stages import (
+    asr,
+    compose,
+    extract,
+    images,
+    review,
+    rewrite,
+    script,
+    storyboard,
+    topic_seed,
+    topics,
+    tts,
+    assets,
+)
 from .stages._common import project_dir, project_version_dir, video_id_from_source
 from .workflow import WorkflowConfig, CapabilityConfig, load_workflow, resolve_capability_prompt, write_workflow_plan
 
@@ -22,9 +35,12 @@ STAGES = [
     "topic_seed",
     "rewrite",
     "script",
+    "script_review",
     "storyboard",
+    "storyboard_review",
     "assets",
     "images",
+    "image_review",
     "tts",
     "compose",
 ]
@@ -133,12 +149,18 @@ def _run_capability(
         rewrite.run(pdir / "transcript.json", cfg, prompt=resolved_prompt)
     elif step == "script":
         script.run(pdir / "topics.json", cfg, prompt=resolved_prompt)
+    elif step == "script_review":
+        review.run(pdir, "script_review")
     elif step == "storyboard":
         storyboard.run(pdir / "scripts.json", cfg, prompt=resolved_prompt)
+    elif step == "storyboard_review":
+        review.run(pdir, "storyboard_review")
     elif step == "assets":
         assets.run(pdir / "storyboards.json", cfg)
     elif step == "images":
         images.run(pdir / "storyboards.json", cfg, prompt=resolved_prompt)
+    elif step == "image_review":
+        review.run(pdir, "image_review")
     elif step == "tts":
         tts.run(pdir / "scripts.json", cfg)
     elif step == "compose":
@@ -205,9 +227,12 @@ def artifact_path(video_id: str, stage: str, cfg: Config, version: str | None = 
         "topics": pdir / "topics.json",
         "rewrite": pdir / "scripts.json",
         "script": pdir / "scripts.json",
+        "script_review": pdir / "reviews" / "script_review.json",
         "storyboard": pdir / "storyboards.json",
+        "storyboard_review": pdir / "reviews" / "storyboard_review.json",
         "assets": pdir / "assets.json",
         "images": pdir / "images.json",
+        "image_review": pdir / "reviews" / "image_review.json",
         "tts": pdir / "tts.json",
         "compose": pdir / "compose.json",
     }[stage]

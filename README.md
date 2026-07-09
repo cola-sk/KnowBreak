@@ -67,6 +67,35 @@ uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID"
 
 默认 workflow 是 `serious_science_one`，会按顺序跑完 `asr → extract → topics → script → storyboard → images → tts → compose`，最终在 `out/<video_id>/compose/` 下按 profile 配置产出 MP4（严肃科普默认 1 个，1080×1920 竖屏，开头标题封面 + 配图背景 + 烧入字幕 + TTS 配音）。
 
+### 人工审核模式（Web 审核台 + 审核闸门）
+
+如果你希望脚本、分镜、图片都先人工确认，再继续下一阶段，使用新增 workflow：
+
+```bash
+uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --workflow serious_science_review
+# 主题直出版本
+uv run knowbreak run "manual:你的主题" --workflow topic_seed_review
+```
+
+这两个 workflow 会在 `script_review → storyboard_review → image_review` 阶段暂停，直到审核状态变成 `approved` 才继续。
+
+审核台是 `app/` 下的 Next.js 项目：
+
+```bash
+cd app
+npm install
+npm run dev
+```
+
+默认地址 `http://localhost:3000`，pipeline 会在终端打印当前审核链接。
+
+可选环境变量：
+
+- `KB_REVIEW_BASE_URL`：审核台地址（默认 `http://localhost:3000`）
+- `KB_REVIEW_POLL_SECONDS`：轮询间隔秒数（默认 `3`）
+- `KB_REVIEW_WAIT_TIMEOUT`：等待超时秒数（默认 `0`，表示不超时）
+- `KB_REVIEW_AUTO_APPROVE`：设为 `1/true` 时自动通过审核闸门（适合 CI）
+
 如果你要“洗稿但不改变原视频结构和知识点”，使用配置式 workflow `rewrite_same_structure`：
 
 ```bash
