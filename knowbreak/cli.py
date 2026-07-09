@@ -19,6 +19,7 @@ from .stages import images as images_stage
 from .stages import rewrite as rewrite_stage
 from .stages import script as script_stage
 from .stages import storyboard as storyboard_stage
+from .stages import topic_seed as topic_seed_stage
 from .stages import topics as topics_stage
 from .stages import tts as tts_stage
 
@@ -39,7 +40,12 @@ def run(
     workflow: str = typer.Option(
         DEFAULT_WORKFLOW,
         "--workflow",
-        help="配置式 workflow 名称，例如 serious_science_one 或 rewrite_same_structure",
+        help="配置式 workflow 名称，例如 serious_science_one / rewrite_same_structure / topic_seed / ming_plague",
+    ),
+    topic: str = typer.Option(
+        None,
+        "--topic",
+        help="手工主题字符串：仅 topic_seed 类 workflow 使用；主题绑定 workflow 会在 TOML 里烤死 topic，CLI 此处可省略",
     ),
 ):
     """全流程：一个视频跑到自动成片 MP4。"""
@@ -55,6 +61,7 @@ def run(
         version_mode=version_mode,  # type: ignore[arg-type]
         version=version,
         workflow_name=workflow,
+        topic=topic,
     )
     console.print(f"\n[green]video_id[/] = {vid}")
     if resolved_version:
@@ -109,6 +116,20 @@ def rewrite_cmd(
     cfg = load_config()
     s = rewrite_stage.run(transcript_path, cfg)
     console.print(f"[green]✓[/] 改写 {len(s.scripts)} 份脚本")
+
+
+@app.command(name="topic-seed")
+def topic_seed_cmd(
+    out_dir: Path = typer.Argument(..., help="输出目录（如 out/<video_id>/v001）"),
+    topic: str = typer.Option(..., "--topic", help="手工主题字符串"),
+    hook: str = typer.Option(None, "--hook", help="开场钩子（可选，不传则由 LLM 生成）"),
+    angle: str = typer.Option(None, "--angle", help="切入角度（可选）"),
+):
+    """阶段 0：手工主题播种，写出 topics.json。"""
+    cfg = load_config()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    t = topic_seed_stage.run(out_dir, cfg, topic=topic, hook=hook, angle=angle, video_id=out_dir.parent.name)
+    console.print(f"[green]✓[/] 主题: {t.topics[0].title}")
 
 
 @app.command(name="storyboard")

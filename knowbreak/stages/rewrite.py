@@ -27,7 +27,7 @@ class _RewriteSchema(BaseModel):
     hashtags: list[str] = []
 
 
-def run(transcript_path: Path, cfg: Config) -> Scripts:
+def run(transcript_path: Path, cfg: Config, *, prompt: str | None = None) -> Scripts:
     transcript = Transcript.model_validate_json(transcript_path.read_text(encoding="utf-8"))
     transcript_blob = _render_transcript(transcript)
     duration_min = cfg.profile.rewrite.target_duration_min
@@ -35,13 +35,15 @@ def run(transcript_path: Path, cfg: Config) -> Scripts:
     chars_per_second = cfg.profile.rewrite.spoken_chars_per_second
     target_chars_min = int(duration_min * chars_per_second)
     target_chars_max = int(duration_max * chars_per_second)
+    system_prompt = prompt or cfg.profile.require_prompt("rewrite_system")
     llm = LLM(cfg.llm)
     retry_feedback: str | None = None
     schema: _RewriteSchema | None = None
     total = 0.0
+    total_chars = 0
     for _ in range(2):
         schema = llm.chat_json(
-            cfg.profile.require_prompt("rewrite_system"),
+            system_prompt,
             _build_user_prompt(
                 transcript.duration,
                 duration_min,

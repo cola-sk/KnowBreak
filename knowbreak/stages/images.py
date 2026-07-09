@@ -38,6 +38,8 @@ def run(
     cfg: Config,
     only_topic: int | None = None,
     cover_only: bool = False,
+    *,
+    prompt: str | None = None,
 ) -> list[dict]:
     boards: Storyboards = Storyboards.model_validate_json(
         storyboards_path.read_text(encoding="utf-8")
@@ -55,7 +57,7 @@ def run(
     for board in boards.storyboards:
         if only_topic is not None and board.topic_index != only_topic:
             continue
-        cover_keywords, kw_map = _keywords_for_board(cfg, llm, board) if llm else ([], {})
+        cover_keywords, kw_map = _keywords_for_board(cfg, llm, board, prompt=prompt) if llm else ([], {})
 
         topic_dir = images_dir / str(board.topic_index)
         topic_dir.mkdir(exist_ok=True)
@@ -135,13 +137,13 @@ def _active_providers(cfg: Config) -> list[str]:
     return providers
 
 
-def _keywords_for_board(cfg: Config, llm: LLM, board) -> tuple[list[str], dict[int, list[str]]]:
+def _keywords_for_board(cfg: Config, llm: LLM, board, *, prompt: str | None = None) -> tuple[list[str], dict[int, list[str]]]:
     shots_blob = "\n".join(
         f"shot {s.index}: subtitle={s.subtitle} | visual={s.visual} | broll={s.broll}"
         for s in board.shots
     )
     schema = llm.chat_json(
-        cfg.profile.require_prompt("images_system"),
+        prompt or cfg.profile.require_prompt("images_system"),
         f"选题：{board.title}\n分镜：\n{shots_blob}\n",
         _Schema,
         temperature=cfg.profile.generation.images_temperature,

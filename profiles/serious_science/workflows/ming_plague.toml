@@ -1,0 +1,39 @@
+id = "ming_plague"
+description = "主题绑定 workflow：鼠疫如何影响明朝历史进程。topic/hook/angle 烤死在 params 里，script 用主题特定 prompt，其余沿用标准 prompt。"
+
+steps = [
+  "topic_seed",
+  "script",
+  "storyboard",
+  "images",
+  "tts",
+  "compose",
+]
+
+[capabilities.topic_seed]
+params = { topic = "鼠疫是如何影响明朝历史进程的", hook = "崇祯六年的北京城，不是被攻破的，是被鼠疫掏空的。", angle = "从北京城人口与城防崩溃切入，串起鼠疫与明朝灭亡的因果链" }
+inputs = []
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/ming_plague/script.md"
+inputs = ["topics.json"]
+outputs = ["scripts.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

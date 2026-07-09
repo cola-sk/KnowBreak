@@ -28,14 +28,15 @@ class _StoryboardSchema(BaseModel):
     shots: list[_ShotItem]
 
 
-def run(scripts_path: Path, cfg: Config) -> Storyboards:
+def run(scripts_path: Path, cfg: Config, *, prompt: str | None = None) -> Storyboards:
     scripts: Scripts = Scripts.model_validate_json(scripts_path.read_text(encoding="utf-8"))
+    system_prompt = prompt or cfg.profile.require_prompt("storyboard_system")
     llm = LLM(cfg.llm)
     boards: list[Storyboard] = []
     for script in scripts.scripts:
         narration_blob = "\n".join(f"- {line.text}" for line in script.lines)
         schema = llm.chat_json(
-            cfg.profile.require_prompt("storyboard_system"),
+            system_prompt,
             f"选题标题：{script.title}\n口播内容（按行）：\n{narration_blob}\n总时长目标：{script.total_duration}s\n",
             _StoryboardSchema,
             temperature=cfg.profile.generation.storyboard_temperature,

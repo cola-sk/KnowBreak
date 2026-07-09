@@ -1,0 +1,38 @@
+id = "topic_seed"
+description = "从一个手工给定的主题直接生成短视频：跳过 ASR/提取/选题，用标准 prompt 出脚本和分镜。"
+
+steps = [
+  "topic_seed",
+  "script",
+  "storyboard",
+  "images",
+  "tts",
+  "compose",
+]
+
+[capabilities.topic_seed]
+inputs = []
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/script.md"
+inputs = ["topics.json"]
+outputs = ["scripts.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

@@ -26,21 +26,27 @@ class _ScriptSchema(BaseModel):
     hashtags: list[str] = []
 
 
-def run(topics_path: Path, cfg: Config) -> Scripts:
+def run(topics_path: Path, cfg: Config, *, prompt: str | None = None) -> Scripts:
     topics: Topics = Topics.model_validate_json(topics_path.read_text(encoding="utf-8"))
     kpath = _knowledge_path_for(topics_path)
-    knowledge: Knowledge = Knowledge.model_validate_json(kpath.read_text(encoding="utf-8"))
+    # topic_seed 路径下没有 knowledge.json：仅靠 topic title/hook/angle 出脚本即可。
+    knowledge: Knowledge | None = None
+    if kpath.exists():
+        knowledge = Knowledge.model_validate_json(kpath.read_text(encoding="utf-8"))
 
+    system_prompt = prompt or cfg.profile.require_prompt("script_system")
     llm = LLM(cfg.llm)
     scripts: list[Script] = []
     for topic in topics.topics:
-        points_blob = "\n".join(
-            f"- {knowledge.points[i].title}: {knowledge.points[i].summary}\n  论断: {'; '.join(knowledge.points[i].key_statements)}"
-            for i in topic.knowledge_refs
-            if 0 <= i < len(knowledge.points)
-        )
+        points_blob = ""
+        if knowledge:
+            points_blob = "\n".join(
+                f"- {knowledge.points[i].title}: {knowledge.points[i].summary}\n  论断: {'; '.join(knowledge.points[i].key_statements)}"
+                for i in topic.knowledge_refs
+                if 0 <= i < len(knowledge.points)
+            )
         schema = llm.chat_json(
-            cfg.profile.require_prompt("script_system"),
+            system_prompt,
             f"选题标题：{topic.title}\n钩子方向：{topic.hook}\n切入角度：{topic.angle}\n目标时长：{topic.target_duration}s\n参考知识点：\n{points_blob}\n",
             _ScriptSchema,
             temperature=cfg.profile.generation.script_temperature,

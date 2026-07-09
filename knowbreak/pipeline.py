@@ -9,9 +9,9 @@ from typing import Literal
 from rich.console import Console
 
 from .config import Config
-from .stages import asr, extract, topics, script, storyboard, assets, images, tts, compose, rewrite
+from .stages import asr, extract, topics, script, storyboard, assets, images, tts, compose, rewrite, topic_seed
 from .stages._common import project_dir, project_version_dir, video_id_from_source
-from .workflow import WorkflowConfig, load_workflow, write_workflow_plan
+from .workflow import WorkflowConfig, CapabilityConfig, load_workflow, resolve_capability_prompt, write_workflow_plan
 
 console = Console()
 
@@ -19,6 +19,7 @@ STAGES = [
     "asr",
     "extract",
     "topics",
+    "topic_seed",
     "rewrite",
     "script",
     "storyboard",
@@ -39,6 +40,7 @@ def run_full(
     version_mode: VersionMode = "legacy",
     version: str | None = None,
     workflow_name: str = DEFAULT_WORKFLOW,
+    topic: str | None = None,
 ) -> tuple[str, str | None]:
     """全流程跑一个视频。返回 video_id。"""
     if version_mode == "create" and start_from is not None:
@@ -46,13 +48,29 @@ def run_full(
     workflow = load_workflow(cfg.profile.base_dir, workflow_name)
     if start_from is not None and start_from not in workflow.steps:
         raise ValueError(f"workflow {workflow.id} 不包含阶段 {start_from}")
+    # topic_seed workflow 不需要视频源；用主题字符串生成稳定 video_id
+    if "asr" not in workflow.steps:
+        ts_cap = workflow.capabilities.get("topic_seed", CapabilityConfig())
+        baked_topic = ts_cap.params.get("topic")
+        if source.startswith("manual:"):
+            cli_topic = source[len("manual:"):]
+        else:
+            cli_topic = topic
+        resolved_topic = baked_topic or cli_topic
+        if not resolved_topic:
+            raise ValueError(
+                "topic_seed workflow 需要主题：在 workflow [capabilities.topic_seed].params.topic 里配置，"
+                "或通过 CLI --topic / source 前缀 'manual:' 传入"
+            )
+        topic = resolved_topic
+        source = resolved_topic  # 用主题字符串生成稳定 video_id
     video_id = video_id_from_source(source)
     pdir, resolved_version = resolve_project_run_dir(cfg, video_id, version_mode, version)
     source_cache_dir = project_dir(cfg.out_dir, video_id) if resolved_version else None
     write_workflow_plan(workflow, profile_name=cfg.profile.name, output_dir=pdir)
 
     start_idx = 0 if start_from is None else workflow.steps.index(start_from)
-    _run_workflow_steps(workflow, start_idx, source, cfg, pdir, source_cache_dir)
+    _run_workflow_steps(workflow, start_idx, source, cfg, pdir, source_cache_dir, topic=topic)
 
     console.print(f"[green]✓ 完成[/] 产出目录: {pdir}")
     return video_id, resolved_version
@@ -65,10 +83,12 @@ def _run_workflow_steps(
     cfg: Config,
     pdir: Path,
     source_cache_dir: Path | None,
+    *,
+    topic: str | None = None,
 ) -> None:
     for idx, step in enumerate(workflow.steps[start_idx:], start=start_idx):
         console.print(f"[cyan]▸ 阶段 {idx + 1}/{len(workflow.steps)} {step}[/]")
-        _run_capability(step, source, cfg, pdir, source_cache_dir)
+        _run_capability(step, source, cfg, pdir, source_cache_dir, workflow=workflow, topic=topic)
 
 
 def _run_capability(
@@ -77,23 +97,45 @@ def _run_capability(
     cfg: Config,
     pdir: Path,
     source_cache_dir: Path | None,
+    *,
+    workflow: WorkflowConfig,
+    topic: str | None = None,
 ) -> None:
+    cap = workflow.capabilities.get(step, CapabilityConfig())
+    # 运行时把 workflow 里的 prompt 路径解析成文件内容；缺失则回退到 profile 标准 prompt
+    resolved_prompt = resolve_capability_prompt(workflow, step, cfg.profile.base_dir)
     if step == "asr":
         asr.run(source, cfg, pdir=pdir, source_cache_dir=source_cache_dir)
     elif step == "extract":
         extract.run(pdir / "transcript.json", cfg)
     elif step == "topics":
         topics.run(pdir / "knowledge.json", cfg, output_dir=pdir)
+    elif step == "topic_seed":
+        # 优先级：workflow params 里烤死的 topic > CLI --topic 传入
+        t = cap.params.get("topic") or topic
+        if not t:
+            raise ValueError(
+                "topic_seed 阶段需要主题：在 workflow [capabilities.topic_seed].params.topic 里配置，"
+                "或通过 CLI --topic 传入"
+            )
+        topic_seed.run(
+            pdir,
+            cfg,
+            topic=t,
+            hook=cap.params.get("hook"),
+            angle=cap.params.get("angle"),
+            video_id=pdir.parent.name if pdir.parent.exists() else None,
+        )
     elif step == "rewrite":
-        rewrite.run(pdir / "transcript.json", cfg)
+        rewrite.run(pdir / "transcript.json", cfg, prompt=resolved_prompt)
     elif step == "script":
-        script.run(pdir / "topics.json", cfg)
+        script.run(pdir / "topics.json", cfg, prompt=resolved_prompt)
     elif step == "storyboard":
-        storyboard.run(pdir / "scripts.json", cfg)
+        storyboard.run(pdir / "scripts.json", cfg, prompt=resolved_prompt)
     elif step == "assets":
         assets.run(pdir / "storyboards.json", cfg)
     elif step == "images":
-        images.run(pdir / "storyboards.json", cfg)
+        images.run(pdir / "storyboards.json", cfg, prompt=resolved_prompt)
     elif step == "tts":
         tts.run(pdir / "scripts.json", cfg)
     elif step == "compose":

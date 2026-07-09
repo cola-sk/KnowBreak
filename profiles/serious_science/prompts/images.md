@@ -16,4 +16,9 @@
 - cover_keywords 必须优先体现选题标题和前 1-2 个分镜里的具体主体，不能只给抽象概念。比如标题涉及“葫芦娃/中国动画/童年动画”，封面关键词应围绕 seven colorful gourds、Chinese cartoon inspired、grandfather silhouette、vine、snake demon silhouette、math probability，而不是只写 probability、strategy、question mark。
 - 遇到知名影视/动画/IP 时，不要搜索原片截图或角色复制；使用“inspired / symbolic / silhouette / colorful object icons”等非侵权表达，让封面和主题有关但不搬运原作品画面。
 
+选题围绕命名作品或具体视觉母题时（例如葫芦娃/葫芦/童年动画），所有分镜的关键词都要强制带上该母题的符号化物件，再叠加该 shot 的真实概念。这样所有 b-roll 视觉同源，不会出现一张葫芦图 + 一张骰子图 + 一张白板图这种拼贴感。
+- 葫芦娃母题可用符号：calabash / gourd / seven colorful gourds / vine / grandfather silhouette / snake silhouette / toad / mountain spirit silhouette / paper-cut style / Chinese cartoon inspired。
+- 例：分镜在讲“成功率”，关键词写 “seven colorful gourds probability chart”；分镜在讲“失败代价”，写 “calabash tokens risk loss infographic”；分镜在讲“时间轴”，写 “gourd timeline seven days”。不要因为分镜本身是数学/策略，就退回到 generic whiteboard / dice / chart 这种与母题无关的素材。
+- cover_keywords 同样必须包含葫芦母题符号之一，外加选题标题里的核心名词。
+
 输出 JSON：{"cover_keywords": ["milk calcium bone health"], "shots": [{"index": 0, "keywords": ["bone density", "skeleton illustration"]}]}

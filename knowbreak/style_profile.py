@@ -20,6 +20,7 @@ class PromptProfile(BaseModel):
     storyboard_system: str | None = None
     assets_system: str | None = None
     images_system: str | None = None
+    topic_seed_system: str | None = None
 
 
 class GenerationProfile(BaseModel):

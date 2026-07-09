@@ -15,6 +15,9 @@ class CapabilityConfig(BaseModel):
     prompt: str | None = None
     inputs: list[str] = Field(default_factory=list)
     outputs: list[str] = Field(default_factory=list)
+    # stage 专属参数：例如 topic_seed 的 topic/hook/angle 可以烤进 workflow TOML，
+    # 让 workflow 直接和一个主题绑定；通用 workflow 则由 CLI --topic 传入。
+    params: dict[str, str] = Field(default_factory=dict)
 
 
 class WorkflowConfig(BaseModel):
@@ -33,6 +36,22 @@ def load_workflow(profile_dir: Path, workflow_name: str) -> WorkflowConfig:
     return WorkflowConfig.model_validate(tomllib.loads(path.read_text(encoding="utf-8")))
 
 
+def resolve_capability_prompt(workflow: WorkflowConfig, step: str, profile_base_dir: Path) -> str | None:
+    """把 workflow 里某 capability 的 prompt 路径解析成文件内容。
+
+    workflow TOML 里 prompt 是相对路径（如 prompts/ming_plague/script.md），
+    stage 运行时需要拿到可用字符串。plan.json 里仍保留路径用于追溯。
+    """
+    cap = workflow.capabilities.get(step, CapabilityConfig())
+    if not cap.prompt:
+        return None
+    if cap.prompt.startswith("prompts/") or "/" in cap.prompt or cap.prompt.endswith(".md"):
+        prompt_path = profile_base_dir / cap.prompt
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8").strip()
+    return cap.prompt
+
+
 def write_workflow_plan(
     workflow: WorkflowConfig,
     *,
@@ -49,6 +68,7 @@ def write_workflow_plan(
                 "prompt": workflow.capabilities.get(step, CapabilityConfig()).prompt,
                 "inputs": workflow.capabilities.get(step, CapabilityConfig()).inputs,
                 "outputs": workflow.capabilities.get(step, CapabilityConfig()).outputs,
+                "params": workflow.capabilities.get(step, CapabilityConfig()).params,
             }
             for step in workflow.steps
         ],

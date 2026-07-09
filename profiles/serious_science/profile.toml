@@ -8,6 +8,7 @@ rewrite_system = "prompts/rewrite.md"
 script_system = "prompts/script.md"
 storyboard_system = "prompts/storyboard.md"
 assets_system = "prompts/assets.md"
+topic_seed_system = "prompts/topic_seed.md"
 images_system = "prompts/images.md"
 
 [intro]
