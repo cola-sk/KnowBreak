@@ -1,0 +1,54 @@
+id = "typhoon_tape_myth"
+description = "主题绑定 workflow：台风天给玻璃贴米字形胶带是否真的有用。带有人工审核闸门（脚本/分镜/图片分别审核后再继续）。"
+
+steps = [
+  "topic_seed",
+  "script",
+  "script_review",
+  "storyboard",
+  "storyboard_review",
+  "images",
+  "image_review",
+  "tts",
+  "compose",
+]
+
+[capabilities.topic_seed]
+params = { topic = "台风天在玻璃上贴米字形胶带是否有用", hook = "台风：听说你们在窗户上贴个“米”字，就能防住我了？", angle = "从台风天贴米字胶带这一常见防灾动作切入，揭示其在物理抗风上的无用性，并科普正确的窗户防风避险姿势", target_duration = "120" }
+inputs = []
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/topics/typhoon_tape_myth/script.md"
+inputs = ["topics.json"]
+outputs = ["scripts.json"]
+
+[capabilities.script_review]
+inputs = ["scripts.json"]
+outputs = ["reviews/script_review.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.storyboard_review]
+inputs = ["storyboards.json"]
+outputs = ["reviews/storyboard_review.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.image_review]
+inputs = ["images.json"]
+outputs = ["reviews/image_review.json"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

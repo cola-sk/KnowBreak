@@ -143,30 +143,41 @@ def _run_capability(
             hook=cap.params.get("hook"),
             angle=cap.params.get("angle"),
             target_duration=target_duration,
-            video_id=pdir.parent.name if pdir.parent.exists() else None,
+            video_id=_video_id_from_run_dir(pdir, cfg.out_dir),
         )
     elif step == "rewrite":
         rewrite.run(pdir / "transcript.json", cfg, prompt=resolved_prompt)
     elif step == "script":
         script.run(pdir / "topics.json", cfg, prompt=resolved_prompt)
     elif step == "script_review":
-        review.run(pdir, "script_review")
+        review.run(pdir, "script_review", out_dir=cfg.out_dir)
     elif step == "storyboard":
         storyboard.run(pdir / "scripts.json", cfg, prompt=resolved_prompt)
     elif step == "storyboard_review":
-        review.run(pdir, "storyboard_review")
+        review.run(pdir, "storyboard_review", out_dir=cfg.out_dir)
     elif step == "assets":
         assets.run(pdir / "storyboards.json", cfg)
     elif step == "images":
         images.run(pdir / "storyboards.json", cfg, prompt=resolved_prompt)
     elif step == "image_review":
-        review.run(pdir, "image_review")
+        review.run(pdir, "image_review", out_dir=cfg.out_dir)
     elif step == "tts":
         tts.run(pdir / "scripts.json", cfg)
     elif step == "compose":
         compose.run(pdir / "tts.json", cfg)
     else:
         raise ValueError(f"未知 capability: {step}")
+
+
+def _video_id_from_run_dir(pdir: Path, out_dir: Path) -> str:
+    """Return the project video_id for legacy and versioned run directories."""
+    try:
+        if pdir.parent.resolve() == out_dir.resolve():
+            return pdir.name
+    except FileNotFoundError:
+        if pdir.parent == out_dir:
+            return pdir.name
+    return pdir.parent.name
 
 
 def resolve_project_run_dir(

@@ -1,6 +1,5 @@
-import { notFound } from "next/navigation";
-
 import { ImageReviewClient, type ImageReviewPayload } from "@/components/image-review-client";
+import { ReviewUnavailable } from "@/components/review-unavailable";
 import { StageHeader } from "@/components/stage-header";
 import { getStageData } from "@/lib/review-store";
 
@@ -9,8 +8,8 @@ interface Props {
 }
 
 export default async function ImageReviewPage({ params }: Props) {
+  const { videoId, version } = await params;
   try {
-    const { videoId, version } = await params;
     const initial = (await getStageData(
       videoId,
       version,
@@ -23,7 +22,15 @@ export default async function ImageReviewPage({ params }: Props) {
         <ImageReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );
-  } catch {
-    notFound();
+  } catch (error) {
+    return (
+      <ReviewUnavailable
+        videoId={videoId}
+        version={version}
+        active="images"
+        stageLabel="图片审核"
+        error={error}
+      />
+    );
   }
 }

@@ -37,7 +37,7 @@ REVIEW_PAGES: dict[ReviewStage, str] = {
 }
 
 
-def run(pdir: Path, stage: ReviewStage) -> dict:
+def run(pdir: Path, stage: ReviewStage, *, out_dir: Path | None = None) -> dict:
     """等待某审核阶段被人工通过。"""
     review_path = pdir / "reviews" / REVIEW_FILES[stage]
     artifact_path = pdir / ARTIFACT_FILES[stage]
@@ -63,7 +63,7 @@ def run(pdir: Path, stage: ReviewStage) -> dict:
         console.print(f"[green]✓[/] {stage} 自动通过 (KB_REVIEW_AUTO_APPROVE)")
         return review
 
-    review_url = _review_url(pdir, stage)
+    review_url = _review_url(pdir, stage, out_dir=out_dir)
     console.print(f"[yellow]审核地址[/] {review_url}")
     console.print("[yellow]等待人工审核通过...[/]")
 
@@ -153,14 +153,23 @@ def _build_items(stage: ReviewStage, artifact: object) -> list[dict]:
     return items
 
 
-def _review_url(pdir: Path, stage: ReviewStage) -> str:
+def _review_url(pdir: Path, stage: ReviewStage, *, out_dir: Path | None = None) -> str:
     base = os.getenv("KB_REVIEW_BASE_URL", "http://localhost:8800").rstrip("/")
     version = "legacy"
     video_id = pdir.name
-    if pdir.parent.name != "out":
+    if not _is_legacy_run_dir(pdir, out_dir):
         version = pdir.name
         video_id = pdir.parent.name
     return f"{base}/projects/{video_id}/{version}/{REVIEW_PAGES[stage]}"
+
+
+def _is_legacy_run_dir(pdir: Path, out_dir: Path | None) -> bool:
+    if out_dir is not None:
+        try:
+            return pdir.parent.resolve() == out_dir.resolve()
+        except FileNotFoundError:
+            return pdir.parent == out_dir
+    return pdir.parent.name == "out"
 
 
 def _poll_seconds() -> float:

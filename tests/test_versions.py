@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 
 from knowbreak.config import ASRConfig, Config, IntroConfig, LLMConfig, TTSConfig
-from knowbreak.pipeline import artifact_path, resolve_project_run_dir, run_full
+from knowbreak.pipeline import _video_id_from_run_dir, artifact_path, resolve_project_run_dir, run_full
+from knowbreak.stages.review import _review_url
 from knowbreak.stages.compose import _load_images_map
 
 
@@ -86,3 +87,21 @@ def test_compose_loads_versioned_image_paths(tmp_path: Path) -> None:
 
     assert covers[0] == str(out_dir / "video123" / "v001" / "images" / "0" / "cover.jpg")
     assert shots[0][0] == str(out_dir / "video123" / "v001" / "images" / "0" / "shot_000.jpg")
+
+
+def test_video_id_from_run_dir_handles_legacy_and_versioned_dirs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "custom-out"
+
+    assert _video_id_from_run_dir(out_dir / "video123", out_dir) == "video123"
+    assert _video_id_from_run_dir(out_dir / "video123" / "v001", out_dir) == "video123"
+
+
+def test_review_url_handles_custom_out_dir_for_legacy_and_versioned_runs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "custom-out"
+
+    assert _review_url(out_dir / "video123", "script_review", out_dir=out_dir) == (
+        "http://localhost:8800/projects/video123/legacy/script"
+    )
+    assert _review_url(out_dir / "video123" / "v001", "script_review", out_dir=out_dir) == (
+        "http://localhost:8800/projects/video123/v001/script"
+    )

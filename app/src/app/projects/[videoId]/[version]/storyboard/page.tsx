@@ -1,5 +1,4 @@
-import { notFound } from "next/navigation";
-
+import { ReviewUnavailable } from "@/components/review-unavailable";
 import { StageHeader } from "@/components/stage-header";
 import {
   StoryboardReviewClient,
@@ -12,8 +11,8 @@ interface Props {
 }
 
 export default async function StoryboardReviewPage({ params }: Props) {
+  const { videoId, version } = await params;
   try {
-    const { videoId, version } = await params;
     const initial = (await getStageData(
       videoId,
       version,
@@ -26,7 +25,15 @@ export default async function StoryboardReviewPage({ params }: Props) {
         <StoryboardReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );
-  } catch {
-    notFound();
+  } catch (error) {
+    return (
+      <ReviewUnavailable
+        videoId={videoId}
+        version={version}
+        active="storyboard"
+        stageLabel="分镜审核"
+        error={error}
+      />
+    );
   }
 }
