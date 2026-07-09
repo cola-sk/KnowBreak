@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 Color = tuple[int, int, int]
 
@@ -15,6 +15,7 @@ class PromptProfile(BaseModel):
 
     extract_system: str | None = None
     topics_system: str | None = None
+    rewrite_system: str | None = None
     script_system: str | None = None
     storyboard_system: str | None = None
     assets_system: str | None = None
@@ -26,6 +27,7 @@ class GenerationProfile(BaseModel):
 
     extract_temperature: float | None = None
     topics_temperature: float | None = None
+    rewrite_temperature: float | None = None
     script_temperature: float | None = 0.8
     storyboard_temperature: float | None = None
     assets_temperature: float | None = None
@@ -85,6 +87,8 @@ class ComposeProfile(BaseModel):
 class StyleProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    _base_dir: Path = PrivateAttr(default=Path("."))
+
     name: str = "default"
     description: str = ""
     prompts: PromptProfile = Field(default_factory=PromptProfile)
@@ -93,6 +97,18 @@ class StyleProfile(BaseModel):
     topics: TopicsProfile = Field(default_factory=TopicsProfile)
     compose: ComposeProfile = Field(default_factory=ComposeProfile)
 
+    @property
+    def base_dir(self) -> Path:
+        return self._base_dir
+
+    def require_prompt(self, field_name: str) -> str:
+        prompt = getattr(self.prompts, field_name)
+        if not prompt:
+            raise RuntimeError(
+                f"profile {self.name} 缺少 prompts.{field_name}，请检查 {self.base_dir / 'profile.toml'}"
+            )
+        return prompt
+
 
 def load_style_profile(project_root: Path, profile_name: str, profile_path: str | None) -> StyleProfile:
     path = _resolve_profile_path(project_root, profile_name, profile_path)
@@ -100,7 +116,9 @@ def load_style_profile(project_root: Path, profile_name: str, profile_path: str 
         raise ValueError(f"不支持的风格 profile 格式: {path}")
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     _expand_prompt_files(data, path.parent)
-    return StyleProfile.model_validate(data)
+    profile = StyleProfile.model_validate(data)
+    profile._base_dir = path.parent
+    return profile
 
 
 def _resolve_profile_path(project_root: Path, profile_name: str, profile_path: str | None) -> Path:

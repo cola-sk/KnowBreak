@@ -1,0 +1,38 @@
+id = "rewrite_same_structure"
+description = "按原视频结构洗稿：不重新拆知识点和选题，保持原结构改写成 1 条视频。"
+
+steps = [
+  "asr",
+  "rewrite",
+  "storyboard",
+  "images",
+  "tts",
+  "compose",
+]
+
+[capabilities.asr]
+inputs = ["source"]
+outputs = ["transcript.json", "audio.wav"]
+
+[capabilities.rewrite]
+prompt = "prompts/rewrite.md"
+inputs = ["transcript.json"]
+outputs = ["scripts.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

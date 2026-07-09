@@ -2,7 +2,7 @@
 
 **知点拆解局** —— 知识二创短视频生产流水线。
 
-把一个长视频（讲座/科普/访谈）拆成 3-5 个原创短视频选题，生成口播脚本和画面分镜，最后在 CapCut/PR 里成片。**不搬运原视频**，只用其知识点做二创输入。
+把一个长视频（讲座/科普/访谈）提炼成原创短视频选题，生成口播脚本和画面分镜，最后自动成片。**不搬运原视频**，只用其知识点做二创输入。默认严肃科普 profile 只生成 1 个成片；需要多条视频时可在 profile 里调整选题数量。
 
 ## 流水线
 
@@ -16,7 +16,7 @@
 结构化知识点列表
    │  3. 选题拆分            (topics)
    ▼
-3-5 个短视频选题（标题/钩子/要点）
+按 profile 配置生成短视频选题（默认严肃科普为 1 个）
    │  4. 口播脚本生成        (script)
    ▼
 原创逐字口播脚本（~60-90s）
@@ -39,13 +39,14 @@ out/<id>/compose/<topic>.mp4
 
 > 想要全自动跑到 MP4 用 `knowbreak run`；只想搭时间线在剪映/CapCut 里精修，跑到 `storyboard` 或 `assets` 即可。
 
-## 阶段执行策略
+## 能力执行策略
 
-| 阶段 | 输入 | 使用能力 | Profile prompt / 配置 | 执行策略 | 产出文件 | 版本目录规则 |
+| 能力 | 输入 | 使用能力 | Profile prompt / 配置 | 执行策略 | 产出文件 | 版本目录规则 |
 |---|---|---|---|---|---|---|
 | 1. `asr` 字幕/转写 | 视频 URL、本地视频、`.srt` / `.vtt` / `.ass` 字幕 | `yt-dlp`、`ffmpeg`、OpenAI 兼容 ASR 或本地 `faster-whisper` | 不使用 profile prompt；ASR provider 在 `.env` 配置 | 优先使用本地同名字幕或 URL 自动字幕；没有字幕时下载/抽取音频为 16kHz 单声道 WAV，再走 ASR。OpenAI 兼容 ASR 会先尝试带 segment 时间戳，失败后回退为纯文本整段 segment。 | `audio.wav`、`transcript.json`、字幕文件；URL 源视频缓存为根目录 `source.mp4` | 版本模式下 `transcript.json` / `audio.wav` 放在版本目录；只有 `source.mp4` 可跨版本共享 |
 | 2. `extract` 知识点提取 | `transcript.json` | LLM JSON 结构化输出 | `prompts/extract.md` 作为 system prompt，在逐字稿渲染成时间戳文本后调用；定义知识点数量、字段、摘要和原文依据要求 | 把逐字稿渲染为带时间戳文本，要求 LLM 提炼 5-12 个知识点，每个知识点包含摘要、核心论断、示例和原文依据。 | `knowledge.json` | 版本化产物；不同 profile / prompt 下必须重新生成，不跨版本共享 |
-| 3. `topics` 选题拆分 | `knowledge.json` | LLM JSON 结构化输出 | `prompts/topics.md` 作为 system prompt，在知识点提取完成后调用；定义选题数量、标题、hook、angle、知识点引用和目标时长 | 基于知识点生成 3-5 个独立短视频选题；当前 prompt 偏中国抖音/视频号严肃科普，强调抓人标题、3 秒钩子、误区纠偏、证据和可执行结论。 | `topics.json` | 版本化产物，放在 `out/<video_id>/<version>/` |
+| 3. `topics` 选题拆分 | `knowledge.json` | LLM JSON 结构化输出 | `prompts/topics.md` 作为 system prompt，在知识点提取完成后调用；`profile.toml` 的 `[topics]` 定义选题数量和目标时长范围 | 基于知识点生成指定数量的独立短视频选题；当前严肃科普 profile 默认只生成 1 个 topic，强调抓人标题、3 秒钩子、误区纠偏、证据和可执行结论。 | `topics.json` | 版本化产物，放在 `out/<video_id>/<version>/` |
+| 3b. `rewrite` 按原结构洗稿 | `transcript.json` | LLM JSON 结构化输出 | `prompts/rewrite.md` 作为 system prompt；只在 `rewrite_same_structure` workflow 中调用 | 不重新提炼知识点、不拆选题，保持原视频结构、知识点顺序和核心论证，改写成 1 条原创口播脚本。 | `scripts.json` | 版本化产物；与 `script` 二选一产出同一个脚本文件 |
 | 4. `script` 口播脚本 | `topics.json` + `knowledge.json` | LLM JSON 结构化输出 | `prompts/script.md` 作为 system prompt，对每个 topic 单独调用；定义口播结构、语气、禁用流量词、估算时长和 hashtag。严肃科普风格允许前 3 句以内适度卖关子，但要服务事实解释。`generation.script_temperature` 控制生成随机性 | 每个 topic 单独生成原创逐字口播脚本；按“强钩子 → 适度悬念 → 问题说明 → 误区/现象 → 数据/机制 → 行动建议”推进，并给出每句估算时长和 hashtag。 | `scripts.json` | 版本化产物 |
 | 5. `storyboard` 画面分镜 | `scripts.json` | LLM JSON 结构化输出 | `prompts/storyboard.md` 作为 system prompt，在脚本生成后调用；定义 shot 字段、画面风格、字幕密度和免版权画面要求。前 3 个 shot 以内可保留“常见认知 vs 真实原因”的悬念，但第 3 个 shot 内要进入事实解释 | 把口播拆成竖屏分镜，每个 shot 包含 narration、visual、broll、subtitle、duration；画面风格偏严肃科普的信息图、真人讲解、实拍和机制示意。LLM 超时或 JSON 异常时中断，不自动生成低质量兜底分镜。 | `storyboards.json` | 版本化产物 |
 | 6. `assets` 资源清单 | `storyboards.json` | LLM JSON 结构化输出 | `prompts/assets.md` 作为 system prompt，在分镜完成后调用；定义资源类型、描述、搜索关键词和版权约束 | 根据每个 topic 的分镜摘要生成 5-12 条资源建议，包含资源类型、具体描述、搜索关键词和可选来源 URL；用于人工精修或后续素材搜索。 | `assets.json` | 版本化产物 |
@@ -55,13 +56,21 @@ out/<id>/compose/<topic>.mp4
 
 ## 一键执行（新视频最常用）
 
-配置好 `.env` 后（见下方 [配置](#配置)），一个新 YouTube 视频从下载到产出 N 个 MP4 只需一条命令：
+配置好 `.env` 后（见下方 [配置](#配置)），一个新 YouTube 视频从下载到产出 MP4 只需一条命令：
 
 ```bash
 uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
-会按顺序自动跑完 9 个阶段（asr → extract → topics → script → storyboard → assets → images → tts → compose），最终在 `out/<video_id>/compose/` 下产出 3-5 个 MP4（每个选题一个，1080×1920 竖屏，开头标题封面 + 配图背景 + 烧入字幕 + TTS 配音）。
+默认 workflow 是 `serious_science_one`，会按顺序跑完 `asr → extract → topics → script → storyboard → images → tts → compose`，最终在 `out/<video_id>/compose/` 下按 profile 配置产出 MP4（严肃科普默认 1 个，1080×1920 竖屏，开头标题封面 + 配图背景 + 烧入字幕 + TTS 配音）。
+
+如果你要“洗稿但不改变原视频结构和知识点”，使用配置式 workflow `rewrite_same_structure`：
+
+```bash
+uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --workflow rewrite_same_structure
+```
+
+这个 workflow 会跑 `asr → rewrite → storyboard → images → tts → compose`，跳过 `extract`、`topics` 和 `script`，直接按原逐字稿结构改写成 1 条原创口播脚本。每次运行都会在产出目录写入 `workflow_plan.json`，记录本次调用了哪些能力、对应 prompt、输入和输出。
 
 默认内容风格是面向中国抖音/视频号的严肃科普：标题和开头有信息流抓力，但脚本保持克制、可信、强调误区纠偏、关键证据和可执行结论。
 
@@ -71,7 +80,7 @@ uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID"
 
 ```bash
 # 中途断了从某阶段续跑（已生成的产出会保留）
-uv run knowbreak run "..." --from tts
+uv run knowbreak run "..." --workflow rewrite_same_structure --from tts
 
 # 想先看一个选题的效果，省图片 API 配额：分两步
 # 1) 先全流程跑到 compose（如果只关心单题，这步会浪费其他题的配额）
@@ -183,6 +192,15 @@ KB_IMAGE_PROVIDERS=pixabay,pexels
 
 ### 风格 Profile
 
+Workflow 和 profile 是两层配置：
+
+| 配置 | 作用 | 示例 |
+|---|---|---|
+| `profiles/<name>/workflows/*.toml` | 决定调用哪些能力、顺序是什么、每步输入输出是什么 | `serious_science_one`、`rewrite_same_structure` |
+| `profiles/<name>/` | 一个完整创作方案包，包含 workflow、prompt、生成参数和成片样式 | `serious_science` |
+
+Python stage 代码不内置 LLM prompt；所有 LLM 能力必须在 `profile.toml [prompts]` 里绑定对应 `.md` 文件。缺失 prompt 会直接中断，避免静默走代码里的兜底文案。
+
 影响出片质量和观感的非固定参数集中放在 `profiles/<name>/`，`.env` 只负责选择哪套 profile：
 
 ```bash
@@ -197,9 +215,13 @@ KB_STYLE_PROFILE=serious_science
 profiles/
 └── serious_science/
     ├── profile.toml        # 短参数：temperature、颜色、字号、位置等
+    ├── workflows/
+    │   ├── serious_science_one.toml
+    │   └── rewrite_same_structure.toml
     └── prompts/
         ├── extract.md      # 长 prompt：知识点提取
         ├── topics.md       # 长 prompt：选题
+        ├── rewrite.md      # 长 prompt：按原结构洗稿改写
         ├── script.md       # 长 prompt：口播脚本
         ├── storyboard.md   # 长 prompt：分镜
         ├── assets.md       # 长 prompt：资源清单
@@ -211,6 +233,7 @@ profiles/
 | `prompts` | LLM 怎么提知识点、选题、写脚本、拆分镜、生成配图搜索词 | 在 `profile.toml` 里引用 `prompts/topics.md`、`prompts/script.md` 等 |
 | `generation` | 每个 LLM 阶段的生成随机性 | `script_temperature`、`topics_temperature`、`images_temperature` |
 | `intro` | 开头标题封面是否启用、停留时长 | `enabled`、`duration` |
+| `topics` | 生成几个短视频选题、每条目标时长范围 | `count`、`target_duration_min`、`target_duration_max` |
 | `compose` | 最终 MP4 的视觉样式 | 品牌字、尺寸、字体大小、字幕每行字数、遮罩透明度、封面/字幕纵向位置、进度条颜色 |
 
 配置边界：
@@ -293,6 +316,7 @@ uv run knowbreak run ./inputs/source.mp4 --version-mode update --version v002 --
 uv run knowbreak asr ./inputs/source.mp4
 uv run knowbreak extract ./out/<id>/transcript.json
 uv run knowbreak topics ./out/<id>/knowledge.json
+uv run knowbreak rewrite ./out/<id>/transcript.json
 uv run knowbreak script ./out/<id>/topics.json
 uv run knowbreak storyboard ./out/<id>/scripts.json
 uv run knowbreak assets ./out/<id>/storyboards.json
@@ -305,6 +329,7 @@ uv run knowbreak compose ./out/<id>/tts.json --topic 4         # 只生成一个
 # 版本路径，把 v002 替换成目标版本
 uv run knowbreak extract ./out/<id>/v002/transcript.json
 uv run knowbreak topics ./out/<id>/v002/knowledge.json
+uv run knowbreak rewrite ./out/<id>/v002/transcript.json
 uv run knowbreak script ./out/<id>/v002/topics.json
 uv run knowbreak storyboard ./out/<id>/v002/scripts.json
 uv run knowbreak assets ./out/<id>/v002/storyboards.json
@@ -519,6 +544,7 @@ uv run knowbreak run "https://www.youtube.com/watch?v=XA42XDEJcTE"
 
 **输入**：25 分钟（1507s）中文科普视频，主题"牛奶与补钙"
 **总耗时**：约 15 分钟（视频下载 + ASR 转写 + 5 轮 LLM 调用 + 图片获取 + TTS + 成片）
+**说明**：下表是早期 `topics.count=5` 时的规模参考；当前 `serious_science` 默认 `topics.count=1`，只会生成 1 个成片。
 
 **产出**（legacy 模式在 `out/<video_id>/` 下；版本模式下所有生成产物都在 `out/<video_id>/<version>/`；根目录只缓存 URL 源视频 `source.mp4`）：
 

@@ -1,0 +1,50 @@
+id = "serious_science_one"
+description = "严肃科普提炼：重新提炼知识点，生成 1 条原创短视频。"
+
+steps = [
+  "asr",
+  "extract",
+  "topics",
+  "script",
+  "storyboard",
+  "images",
+  "tts",
+  "compose",
+]
+
+[capabilities.asr]
+inputs = ["source"]
+outputs = ["transcript.json", "audio.wav"]
+
+[capabilities.extract]
+prompt = "prompts/extract.md"
+inputs = ["transcript.json"]
+outputs = ["knowledge.json"]
+
+[capabilities.topics]
+prompt = "prompts/topics.md"
+inputs = ["knowledge.json"]
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/script.md"
+inputs = ["topics.json", "knowledge.json"]
+outputs = ["scripts.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

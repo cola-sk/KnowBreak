@@ -33,30 +33,6 @@ class _Schema(BaseModel):
     shots: list[_ShotKw]
 
 
-_SYSTEM = """你是短视频配图策划。
-任务：为每个分镜生成 2-3 个英文搜索关键词，用于在免版权图库上找竖向配图。
-
-【最重要的规则】不要把比喻当字面意思：
-中文脚本里常有比喻，例如：
-- "成骨细胞像建筑队" → ✗ 不要搜 "construction worker"（会拿到真人工地照片），✓ 搜 "bone formation illustration" 或 "skeleton anatomy"
-- "维生素D是搬运工" → ✗ 不要搜 "porter"，✓ 搜 "vitamin D supplement" 或 "calcium absorption"
-- "破骨细胞是拆迁队" → ✗ 不要搜 "demolition"，✓ 搜 "bone resorption" 或 "osteoporosis"
-- "锁住钙" → ✗ 不要搜 "lock"，✓ 搜 "calcium bone mineralization"
-
-判断依据的优先级：
-1. subtitle（字幕，最精炼，是画面真实主题）
-2. visual（画面描述，可能含比喻）
-3. broll（最可能含比喻，仅辅助）
-
-关键词要求：
-- 必须英文、具体、可视化
-- 描述该 shot 真实想表达的概念，不是比喻本身
-- 2-3 个词，便于在图库里找到匹配图
-- 另外给出 cover_keywords，用于视频开头封面图，要更有冲击力、适合做点击封面
-
-输出 JSON：{"cover_keywords": ["milk calcium bone health"], "shots": [{"index": 0, "keywords": ["bone density", "skeleton illustration"]}]}"""
-
-
 def run(
     storyboards_path: Path,
     cfg: Config,
@@ -165,7 +141,7 @@ def _keywords_for_board(cfg: Config, llm: LLM, board) -> tuple[list[str], dict[i
         for s in board.shots
     )
     schema = llm.chat_json(
-        cfg.profile.prompts.images_system or _SYSTEM,
+        cfg.profile.require_prompt("images_system"),
         f"选题：{board.title}\n分镜：\n{shots_blob}\n",
         _Schema,
         temperature=cfg.profile.generation.images_temperature,

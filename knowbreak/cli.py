@@ -10,12 +10,13 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import load_config
-from .pipeline import SHARED_STAGES, STAGES, artifact_path, list_projects, run_full
+from .pipeline import DEFAULT_WORKFLOW, SHARED_STAGES, STAGES, artifact_path, list_projects, run_full
 from .stages import assets as assets_stage
 from .stages import asr as asr_stage
 from .stages import compose as compose_stage
 from .stages import extract as extract_stage
 from .stages import images as images_stage
+from .stages import rewrite as rewrite_stage
 from .stages import script as script_stage
 from .stages import storyboard as storyboard_stage
 from .stages import topics as topics_stage
@@ -35,6 +36,11 @@ def run(
         help="版本模式: legacy|create|update。create 会新建 out/<id>/<version>，update 会覆盖指定版本。",
     ),
     version: str = typer.Option(None, "--version", help="版本号/名称，例如 v001 或 draft-a"),
+    workflow: str = typer.Option(
+        DEFAULT_WORKFLOW,
+        "--workflow",
+        help="配置式 workflow 名称，例如 serious_science_one 或 rewrite_same_structure",
+    ),
 ):
     """全流程：一个视频跑到自动成片 MP4。"""
     cfg = load_config()
@@ -48,6 +54,7 @@ def run(
         start_from=resume,
         version_mode=version_mode,  # type: ignore[arg-type]
         version=version,
+        workflow_name=workflow,
     )
     console.print(f"\n[green]video_id[/] = {vid}")
     if resolved_version:
@@ -92,6 +99,16 @@ def script_cmd(
     cfg = load_config()
     s = script_stage.run(topics_path, cfg)
     console.print(f"[green]✓[/] 生成 {len(s.scripts)} 份脚本")
+
+
+@app.command(name="rewrite")
+def rewrite_cmd(
+    transcript_path: Path = typer.Argument(..., help="transcript.json 路径"),
+):
+    """按原视频结构洗稿改写为单条口播脚本。"""
+    cfg = load_config()
+    s = rewrite_stage.run(transcript_path, cfg)
+    console.print(f"[green]✓[/] 改写 {len(s.scripts)} 份脚本")
 
 
 @app.command(name="storyboard")
