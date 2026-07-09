@@ -19,6 +19,7 @@ import {
 export const runtime = "nodejs";
 
 type VersionMode = "create" | "update";
+type CommandVersionMode = "legacy" | VersionMode;
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 const STARTABLE_STAGES = new Set([
@@ -216,15 +217,21 @@ export async function POST(
     }
     validateWorkflowName(workflow);
 
-    let commandMode: VersionMode = mode;
-    let commandVersion = currentVersion;
-    let targetVersion = mode === "update" ? currentVersion : body.targetVersion?.trim();
+    let commandMode: CommandVersionMode = mode;
+    let commandVersion: string | undefined = currentVersion;
+    let targetVersion = mode === "update" && currentVersion !== "legacy" ? currentVersion : body.targetVersion?.trim();
     let jobVersion = currentVersion;
+
+    if (mode === "update" && currentVersion === "legacy") {
+      commandMode = "legacy";
+      commandVersion = undefined;
+      targetVersion = undefined;
+    }
 
     if (mode === "create") {
       if (targetVersion) {
         validateVersion(targetVersion);
-      } else if (startFrom) {
+      } else {
         targetVersion = await nextVersion(videoId);
       }
       if (targetVersion === videoId) {
@@ -232,9 +239,6 @@ export async function POST(
       }
 
       if (startFrom) {
-        if (!targetVersion) {
-          throw new Error("create + 指定阶段需要可用的新版本号");
-        }
         const targetDir = getVersionDir(videoId, targetVersion);
         if (existsSync(targetDir)) {
           throw new Error(`目标版本已存在: ${targetVersion}`);
@@ -244,7 +248,8 @@ export async function POST(
         commandMode = "update";
         commandVersion = targetVersion;
         jobVersion = targetVersion;
-      } else if (targetVersion) {
+      } else {
+        commandMode = "create";
         commandVersion = targetVersion;
       }
     }
@@ -260,7 +265,7 @@ export async function POST(
       commandMode,
     ];
 
-    if (mode === "update" || startFrom || targetVersion) {
+    if (commandVersion) {
       args.push("--version", commandVersion);
     }
     if (startFrom) {
