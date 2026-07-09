@@ -38,11 +38,14 @@ out/<id>/compose/<topic>.mp4
 ```
 
 > 想要全自动跑到 MP4 用 `knowbreak run`；只想搭时间线在剪映/CapCut 里精修，跑到 `storyboard` 或 `assets` 即可。
+>
+> 不想从原视频出发、想直接围绕一个手工给定的主题生成短视频？用 `topic_seed` workflow 跳过 ASR/提取/选题，从阶段 0 直接进入 script → storyboard → ... → compose。
 
 ## 能力执行策略
 
 | 能力 | 输入 | 使用能力 | Profile prompt / 配置 | 执行策略 | 产出文件 | 版本目录规则 |
 |---|---|---|---|---|---|---|
+| 0. `topic_seed` 主题播种 | 手工给定的主题字符串（CLI `--topic` 或 workflow `params.topic`） | LLM JSON 结构化输出 | `prompts/topic_seed.md` 作为 system prompt；只在 `topic_seed` / 主题绑定 workflow 中调用，作为流程第一步 | 把一个手工主题转成可直接进入 `script` 的 Topic。如果 workflow params 同时给了 `topic` / `hook` / `angle`，直接用不调 LLM；只给 `topic` 时由 LLM 生成 ≤20 字标题、3 秒钩子和切入角度。 | `topics.json`（单 Topic） | 版本化产物；不依赖原视频，video_id 由主题字符串稳定生成 |
 | 1. `asr` 字幕/转写 | 视频 URL、本地视频、`.srt` / `.vtt` / `.ass` 字幕 | `yt-dlp`、`ffmpeg`、OpenAI 兼容 ASR 或本地 `faster-whisper` | 不使用 profile prompt；ASR provider 在 `.env` 配置 | 优先使用本地同名字幕或 URL 自动字幕；没有字幕时下载/抽取音频为 16kHz 单声道 WAV，再走 ASR。OpenAI 兼容 ASR 会先尝试带 segment 时间戳，失败后回退为纯文本整段 segment。 | `audio.wav`、`transcript.json`、字幕文件；URL 源视频缓存为根目录 `source.mp4` | 版本模式下 `transcript.json` / `audio.wav` 放在版本目录；只有 `source.mp4` 可跨版本共享 |
 | 2. `extract` 知识点提取 | `transcript.json` | LLM JSON 结构化输出 | `prompts/extract.md` 作为 system prompt，在逐字稿渲染成时间戳文本后调用；定义知识点数量、字段、摘要和原文依据要求 | 把逐字稿渲染为带时间戳文本，要求 LLM 提炼 5-12 个知识点，每个知识点包含摘要、核心论断、示例和原文依据。 | `knowledge.json` | 版本化产物；不同 profile / prompt 下必须重新生成，不跨版本共享 |
 | 3. `topics` 选题拆分 | `knowledge.json` | LLM JSON 结构化输出 | `prompts/topics.md` 作为 system prompt，在知识点提取完成后调用；`profile.toml` 的 `[topics]` 定义选题数量和目标时长范围 | 基于知识点生成指定数量的独立短视频选题；当前严肃科普 profile 默认只生成 1 个 topic，强调抓人标题、3 秒钩子、误区纠偏、证据和可执行结论。 | `topics.json` | 版本化产物，放在 `out/<video_id>/<version>/` |
@@ -71,6 +74,35 @@ uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --workflow rewri
 ```
 
 这个 workflow 会跑 `asr → rewrite → storyboard → images → tts → compose`，跳过 `extract`、`topics` 和 `script`，直接按原逐字稿结构改写成 1 条原创短视频口播脚本。改写时会读取 profile 的 `[rewrite] target_duration_min/max` 和 `spoken_chars_per_second`，默认按 60-90 秒、约 5 字/秒约束正文长度；每次运行都会在产出目录写入 `workflow_plan.json`，记录本次调用了哪些能力、对应 prompt、输入和输出。
+
+### 从手工主题直接生成短视频（不依赖原视频）
+
+不想从原视频出发、已经知道要做什么主题时，用 `topic_seed` workflow 跳过 ASR/提取/选题，从主题字符串直接走到成片：
+
+```bash
+uv run knowbreak run "manual:鼠疫是如何影响明朝历史进程的" --workflow topic_seed
+# 或者用 --topic 显式传主题，source 可以是任意占位字符串
+uv run knowbreak run "manual:_placeholder" --workflow topic_seed --topic "鼠疫是如何影响明朝历史进程的"
+```
+
+`topic_seed` workflow 会跑 `topic_seed → script → storyboard → images → tts → compose`。主题字符串会稳定生成一个 `video_id`（不依赖视频下载），所以同一主题多次跑会落在同一个 `out/<id>/` 下，可以配合 `--version-mode create` 做多版本对比。`topic_seed` 阶段会调 LLM 根据 `prompts/topic_seed.md` 生成 ≤20 字标题、3 秒钩子和切入角度，写入 `topics.json` 后续走标准流程。
+
+### 主题绑定 workflow（topic/hook/angle 烤进 TOML）
+
+如果某个主题要反复跑、或者想固定标题/钩子/角度不让 LLM 自由发挥，复制一份 `workflows/topic_seed.toml` 改成主题绑定 workflow，把 `topic` / `hook` / `angle` 写死在 `[capabilities.topic_seed].params` 里：
+
+```toml
+[capabilities.topic_seed]
+params = { topic = "鼠疫是如何影响明朝历史进程的", hook = "崇祯六年的北京城，不是被攻破的，是被鼠疫掏空的。", angle = "从北京城人口与城防崩溃切入，串起鼠疫与明朝灭亡的因果链" }
+```
+
+内置 `ming_plague` workflow 就是一个完整样例，还会把 `script` 阶段指向主题专属 prompt `prompts/ming_plague/script.md`，其余阶段沿用 profile 标准 prompt：
+
+```bash
+uv run knowbreak run "manual:_placeholder" --workflow ming_plague
+```
+
+workflow TOML 里每个 capability 可以选配 `prompt`（相对 profile 根的 `.md` 路径，如 `prompts/ming_plague/script.md`）和 `params`（stage 专属参数）。运行时会优先读 workflow 里的 prompt，没配则回退到 `profile.toml [prompts]` 绑定的标准 prompt；`workflow_plan.json` 里会记录每个 capability 实际用的 prompt 路径、inputs、outputs 和 params，便于追溯。
 
 默认内容风格是面向中国抖音/视频号的严肃科普：标题和开头有信息流抓力，但脚本保持克制、可信、强调误区纠偏、关键证据和可执行结论。
 
@@ -196,7 +228,7 @@ Workflow 和 profile 是两层配置：
 
 | 配置 | 作用 | 示例 |
 |---|---|---|
-| `profiles/<name>/workflows/*.toml` | 决定调用哪些能力、顺序是什么、每步输入输出是什么 | `serious_science_one`、`rewrite_same_structure` |
+| `profiles/<name>/workflows/*.toml` | 决定调用哪些能力、顺序是什么、每步输入输出是什么；可以在 capability 上覆写 `prompt` 路径和 `params` 参数 | `serious_science_one`、`rewrite_same_structure`、`topic_seed`、`ming_plague` |
 | `profiles/<name>/` | 一个完整创作方案包，包含 workflow、prompt、生成参数和成片样式 | `serious_science` |
 
 Python stage 代码不内置 LLM prompt；所有 LLM 能力必须在 `profile.toml [prompts]` 里绑定对应 `.md` 文件。缺失 prompt 会直接中断，避免静默走代码里的兜底文案。
@@ -216,16 +248,21 @@ profiles/
 └── serious_science/
     ├── profile.toml        # 短参数：temperature、颜色、字号、位置等
     ├── workflows/
-    │   ├── serious_science_one.toml
-    │   └── rewrite_same_structure.toml
+    │   ├── serious_science_one.toml   # 标准全流程：asr → extract → topics → ... → compose
+    │   ├── rewrite_same_structure.toml # 按原结构洗稿：asr → rewrite → ... → compose
+    │   ├── topic_seed.toml            # 通用主题 workflow：topic_seed → script → ... → compose
+    │   └── ming_plague.toml           # 主题绑定样例：topic/hook/angle 烤死在 params 里，script 用主题专属 prompt
     └── prompts/
         ├── extract.md      # 长 prompt：知识点提取
         ├── topics.md       # 长 prompt：选题
         ├── rewrite.md      # 长 prompt：按原结构洗稿改写
+        ├── topic_seed.md   # 长 prompt：手工主题 → 标题/钩子/角度
         ├── script.md       # 长 prompt：口播脚本
         ├── storyboard.md   # 长 prompt：分镜
         ├── assets.md       # 长 prompt：资源清单
-        └── images.md       # 长 prompt：配图关键词
+        ├── images.md       # 长 prompt：配图关键词
+        └── ming_plague/
+            └── script.md   # 主题绑定 workflow 专属的 script prompt 覆写
 ```
 
 | 配置块 | 影响 | 典型可调项 |
@@ -252,6 +289,9 @@ uv run knowbreak --help
 # 全流程：从一个视频链接或本地文件跑到自动成片 MP4
 uv run knowbreak run https://www.bilibili.com/video/xxx
 uv run knowbreak run ./inputs/source.mp4
+
+# 不依赖原视频，从手工主题直接生成短视频
+uv run knowbreak run "manual:鼠疫是如何影响明朝历史进程的" --workflow topic_seed
 ```
 
 产出会写到：
@@ -318,6 +358,7 @@ uv run knowbreak asr ./inputs/source.mp4
 uv run knowbreak extract ./out/<id>/transcript.json
 uv run knowbreak topics ./out/<id>/knowledge.json
 uv run knowbreak rewrite ./out/<id>/transcript.json
+uv run knowbreak topic-seed ./out/<id> --topic "鼠疫是如何影响明朝历史进程的"
 uv run knowbreak script ./out/<id>/topics.json
 uv run knowbreak storyboard ./out/<id>/scripts.json
 uv run knowbreak assets ./out/<id>/storyboards.json
@@ -331,6 +372,7 @@ uv run knowbreak compose ./out/<id>/tts.json --topic 4         # 只生成一个
 uv run knowbreak extract ./out/<id>/v002/transcript.json
 uv run knowbreak topics ./out/<id>/v002/knowledge.json
 uv run knowbreak rewrite ./out/<id>/v002/transcript.json
+uv run knowbreak topic-seed ./out/<id>/v002 --topic "..."
 uv run knowbreak script ./out/<id>/v002/topics.json
 uv run knowbreak storyboard ./out/<id>/v002/scripts.json
 uv run knowbreak assets ./out/<id>/v002/storyboards.json
@@ -359,6 +401,7 @@ uv run knowbreak show <id> --version v002 --stage script
 | 改 `prompts/images.md` | `images → compose` |
 | 改 `prompts/topics.md` | `topics → script → storyboard → assets/images → tts → compose` |
 | 改 `prompts/extract.md` | `extract → topics → script → storyboard → assets/images → tts → compose` |
+| 改 `prompts/topic_seed.md` 或主题绑定 workflow 的 `params` | `topic_seed → script → storyboard → images → tts → compose`，可 `--from script` 续跑后段 |
 
 ### 单题重跑封面/配图
 
@@ -766,10 +809,13 @@ KnowBreak/
 │   ├── models.py           # 数据模型（pydantic）
 │   ├── llm.py              # LLM 客户端
 │   ├── style_profile.py    # 风格 profile 加载与校验
+│   ├── workflow.py         # 配置式 workflow 加载、prompt 解析、plan 写出
 │   └── stages/
 │       ├── asr.py          # 1. 字幕优先，失败后语音转写
 │       ├── extract.py      # 2. 知识点提取
 │       ├── topics.py       # 3. 选题拆分
+│       ├── rewrite.py      # 3b. 按原结构洗稿
+│       ├── topic_seed.py   # 0. 手工主题播种（跳过 ASR/提取/选题）
 │       ├── script.py       # 4. 口播脚本
 │       ├── storyboard.py   # 5. 画面分镜
 │       ├── assets.py       # 6. 资源清单
@@ -835,6 +881,12 @@ uv run knowbreak run ./inputs/source.mp4 --from script
 
 ```bash
 uv run knowbreak asr ./inputs/source.srt
+```
+
+如果根本没有原视频、只想围绕一个主题做原创短视频，用 `topic_seed` workflow 跳过整个 ASR/提取/选题链路：
+
+```bash
+uv run knowbreak run "manual:你的主题" --workflow topic_seed
 ```
 
 ### TTS provider 连接失败 / 超时
