@@ -154,7 +154,7 @@ def _build_items(stage: ReviewStage, artifact: object) -> list[dict]:
 
 
 def _review_url(pdir: Path, stage: ReviewStage) -> str:
-    base = os.getenv("KB_REVIEW_BASE_URL", "http://localhost:3000").rstrip("/")
+    base = os.getenv("KB_REVIEW_BASE_URL", "http://localhost:8800").rstrip("/")
     version = "legacy"
     video_id = pdir.name
     if pdir.parent.name != "out":

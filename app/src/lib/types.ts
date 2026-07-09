@@ -32,12 +32,36 @@ export interface ReviewFile {
 
 export interface VersionSummary {
   version: string;
+  title: string;
   doneStages: string[];
   review: Partial<Record<ReviewStage, ReviewStatus>>;
   updatedAt: string;
+  ignored: boolean;
+  ignoredAt?: string;
 }
 
 export interface ProjectSummary {
   videoId: string;
+  title: string;
   versions: VersionSummary[];
+}
+
+export type RegenerationJobStatus = "running" | "succeeded" | "failed";
+
+export interface RegenerationJob {
+  id: string;
+  status: RegenerationJobStatus;
+  mode: "create" | "update";
+  requestedFromVersion: string;
+  targetVersion?: string;
+  startFrom?: string;
+  workflow: string;
+  source: string;
+  command: string[];
+  logPath: string;
+  pid?: number;
+  startedAt: string;
+  finishedAt?: string;
+  exitCode?: number | null;
+  error?: string;
 }

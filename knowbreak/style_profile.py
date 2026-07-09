@@ -78,6 +78,7 @@ class ComposeProfile(BaseModel):
     cover_brand_font_size: int = 36
     max_chars_per_line: int = 16
     cover_max_chars_per_line: int = 10
+    text_side_margin: int = 80
     top_bar_alpha: int = 170
     bottom_overlay_alpha: int = 150
     cover_overlay_alpha: int = 120

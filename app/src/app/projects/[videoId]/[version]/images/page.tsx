@@ -16,9 +16,10 @@ export default async function ImageReviewPage({ params }: Props) {
       version,
       "images",
     )) as ImageReviewPayload;
+    const title = initial.artifact[0]?.title;
     return (
       <main className="shell">
-        <StageHeader videoId={videoId} version={version} active="images" />
+        <StageHeader videoId={videoId} version={version} title={title} active="images" />
         <ImageReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );

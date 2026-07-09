@@ -5,6 +5,7 @@ import path from "node:path";
 import type {
   ArtifactStage,
   ProjectSummary,
+  RegenerationJob,
   ReviewFile,
   ReviewItem,
   ReviewStage,
@@ -46,6 +47,9 @@ const PIPELINE_ARTIFACTS: Record<string, string> = {
   tts: "tts.json",
   compose: "compose.json",
 };
+const VERSION_FLAGS_FILE = "_version_flags.json";
+const REGENERATION_JOB_FILE = "regenerate_job.json";
+const REVIEW_STAGE_ORDER: ReviewStage[] = ["script_review", "storyboard_review", "image_review"];
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -91,7 +95,7 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
   await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
 
-function getVersionDir(videoId: string, version: string): string {
+export function getVersionDir(videoId: string, version: string): string {
   const safeVideoId = ensureSafeSegment("video_id", videoId);
   const safeVersion = ensureSafeSegment("version", version);
   const outDir = resolveOutDir();
@@ -108,6 +112,19 @@ function artifactPath(videoId: string, version: string, stage: ArtifactStage): s
 
 function reviewPath(videoId: string, version: string, stage: ReviewStage): string {
   return path.join(getVersionDir(videoId, version), "reviews", REVIEW_FILE[stage]);
+}
+
+function versionFlagsPath(videoId: string, version: string): string {
+  return path.join(getVersionDir(videoId, version), "reviews", VERSION_FLAGS_FILE);
+}
+
+function regenerationJobPath(videoId: string, version: string): string {
+  return path.join(getVersionDir(videoId, version), "reviews", REGENERATION_JOB_FILE);
+}
+
+interface VersionFlags {
+  ignored: boolean;
+  ignored_at?: string;
 }
 
 function defaultReview(stage: ReviewStage, items: ReviewItem[]): ReviewFile {
@@ -259,6 +276,193 @@ export async function getStageData(videoId: string, version: string, stage: Arti
   return { artifact, review };
 }
 
+interface ComposeVideo {
+  topic_index: number;
+  title: string;
+  path: string;
+  duration?: number;
+  intro_duration?: number;
+}
+
+interface WorkflowPlan {
+  workflow?: string;
+  steps?: Array<{
+    capability?: string;
+    params?: Record<string, string>;
+  }>;
+}
+
+interface TopicsArtifact {
+  topics?: Array<{
+    title?: string;
+    hook?: string;
+    angle?: string;
+  }>;
+}
+
+interface TranscriptArtifact {
+  source?: string;
+}
+
+export interface ProductionReviewData {
+  videoId: string;
+  version: string;
+  title: string;
+  versionDir: string;
+  source: string;
+  workflow: string;
+  workflowSteps: string[];
+  videos: ComposeVideo[];
+  artifacts: {
+    script: unknown | null;
+    storyboard: unknown | null;
+    images: unknown | null;
+    compose: unknown | null;
+  };
+  reviews: Partial<Record<ReviewStage, ReviewFile>>;
+  job: RegenerationJob | null;
+}
+
+async function readArtifact(videoId: string, version: string, stage: ArtifactStage): Promise<unknown | null> {
+  return readJsonFile<unknown>(artifactPath(videoId, version, stage));
+}
+
+async function readWorkflowPlan(versionDir: string): Promise<WorkflowPlan | null> {
+  return readJsonFile<WorkflowPlan>(path.join(versionDir, "workflow_plan.json"));
+}
+
+function firstNonEmpty(values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+function sourceToTitle(source: string | undefined): string | null {
+  if (!source) {
+    return null;
+  }
+  try {
+    const url = new URL(source);
+    return url.searchParams.get("v") || url.pathname.split("/").filter(Boolean).at(-1) || url.hostname;
+  } catch {
+    const base = path.basename(source);
+    return base.replace(/\.[A-Za-z0-9]+$/, "") || source;
+  }
+}
+
+async function inferVersionTitle(versionDir: string): Promise<string> {
+  const compose = await readJsonFile<{ videos?: Array<{ title?: string }> }>(
+    path.join(versionDir, "compose.json"),
+  );
+  const composeTitle = firstNonEmpty(compose?.videos?.map((video) => video.title) ?? []);
+  if (composeTitle) {
+    return composeTitle;
+  }
+
+  const scripts = await readJsonFile<{ scripts?: Array<{ title?: string }> }>(
+    path.join(versionDir, "scripts.json"),
+  );
+  const scriptTitle = firstNonEmpty(scripts?.scripts?.map((script) => script.title) ?? []);
+  if (scriptTitle) {
+    return scriptTitle;
+  }
+
+  const storyboards = await readJsonFile<{ storyboards?: Array<{ title?: string }> }>(
+    path.join(versionDir, "storyboards.json"),
+  );
+  const storyboardTitle = firstNonEmpty(storyboards?.storyboards?.map((board) => board.title) ?? []);
+  if (storyboardTitle) {
+    return storyboardTitle;
+  }
+
+  const images = await readJsonFile<Array<{ title?: string }>>(path.join(versionDir, "images.json"));
+  const imageTitle = firstNonEmpty(Array.isArray(images) ? images.map((topic) => topic.title) : []);
+  if (imageTitle) {
+    return imageTitle;
+  }
+
+  const topics = await readJsonFile<TopicsArtifact>(path.join(versionDir, "topics.json"));
+  const topicTitle = firstNonEmpty(topics?.topics?.map((topic) => topic.title) ?? []);
+  if (topicTitle) {
+    return topicTitle;
+  }
+
+  const workflowPlan = await readWorkflowPlan(versionDir);
+  const topicSeed = workflowPlan?.steps?.find((step) => step.capability === "topic_seed");
+  const promptTitle = firstNonEmpty([topicSeed?.params?.topic, topicSeed?.params?.hook]);
+  if (promptTitle) {
+    return promptTitle;
+  }
+
+  const transcript = await readJsonFile<TranscriptArtifact>(path.join(versionDir, "transcript.json"));
+  return sourceToTitle(transcript?.source) ?? "未命名视频";
+}
+
+async function inferRegenerationSource(versionDir: string): Promise<string> {
+  const transcript = await readJsonFile<TranscriptArtifact>(path.join(versionDir, "transcript.json"));
+  if (transcript?.source) {
+    return transcript.source;
+  }
+
+  const workflowPlan = await readWorkflowPlan(versionDir);
+  const topicSeed = workflowPlan?.steps?.find((step) => step.capability === "topic_seed");
+  const bakedTopic = topicSeed?.params?.topic;
+  if (bakedTopic) {
+    return bakedTopic;
+  }
+
+  const topics = await readJsonFile<TopicsArtifact>(path.join(versionDir, "topics.json"));
+  const firstTopic = topics?.topics?.[0];
+  if (firstTopic?.title) {
+    return firstTopic.title;
+  }
+
+  throw new Error("Unable to infer regeneration source. Please provide source explicitly.");
+}
+
+export async function getProductionReviewData(
+  videoId: string,
+  version: string,
+): Promise<ProductionReviewData> {
+  const versionDir = getVersionDir(videoId, version);
+  const compose = await readJsonFile<{ videos?: ComposeVideo[] }>(path.join(versionDir, "compose.json"));
+  if (!compose) {
+    throw new Error(`Compose artifact not found: ${path.join(versionDir, "compose.json")}`);
+  }
+
+  const workflowPlan = await readWorkflowPlan(versionDir);
+  const reviews: Partial<Record<ReviewStage, ReviewFile>> = {};
+  for (const reviewStage of REVIEW_STAGE_ORDER) {
+    const review = await readJsonFile<ReviewFile>(reviewPath(videoId, version, reviewStage));
+    if (review) {
+      reviews[reviewStage] = review;
+    }
+  }
+
+  return {
+    videoId,
+    version,
+    title: await inferVersionTitle(versionDir),
+    versionDir,
+    source: await inferRegenerationSource(versionDir),
+    workflow: workflowPlan?.workflow ?? "serious_science_one",
+    workflowSteps: workflowPlan?.steps?.map((step) => step.capability).filter(Boolean) as string[] ?? [],
+    videos: Array.isArray(compose.videos) ? compose.videos : [],
+    artifacts: {
+      script: await readArtifact(videoId, version, "script"),
+      storyboard: await readArtifact(videoId, version, "storyboard"),
+      images: await readArtifact(videoId, version, "images"),
+      compose,
+    },
+    reviews,
+    job: await readRegenerationJob(videoId, version),
+  };
+}
+
 export async function updateStageData(
   videoId: string,
   version: string,
@@ -315,6 +519,188 @@ export async function approveReviewStage(
   return approved;
 }
 
+export async function approveAllReviewStages(videoId: string, version: string): Promise<{
+  appliedStages: ReviewStage[];
+}> {
+  const appliedStages: ReviewStage[] = [];
+  for (const reviewStage of REVIEW_STAGE_ORDER) {
+    const artifactStage = REVIEW_TO_ARTIFACT_STAGE[reviewStage];
+    const artifactFilePath = artifactPath(videoId, version, artifactStage);
+    if (!existsSync(artifactFilePath)) {
+      continue;
+    }
+    await approveReviewStage(videoId, version, reviewStage);
+    appliedStages.push(reviewStage);
+  }
+  await setVersionIgnored(videoId, version, false);
+  return { appliedStages };
+}
+
+export async function setVersionIgnored(
+  videoId: string,
+  version: string,
+  ignored: boolean,
+): Promise<VersionFlags> {
+  const next: VersionFlags = {
+    ignored,
+    ignored_at: ignored ? nowIso() : undefined,
+  };
+  await writeJsonFile(versionFlagsPath(videoId, version), next);
+  return next;
+}
+
+export async function readRegenerationJob(
+  videoId: string,
+  version: string,
+): Promise<RegenerationJob | null> {
+  return readJsonFile<RegenerationJob>(regenerationJobPath(videoId, version));
+}
+
+export async function writeRegenerationJob(
+  videoId: string,
+  version: string,
+  job: RegenerationJob,
+): Promise<RegenerationJob> {
+  await writeJsonFile(regenerationJobPath(videoId, version), job);
+  return job;
+}
+
+export function resolveReviewRelativePath(filePath: string): string {
+  const outDir = resolveOutDir();
+  const rel = path.relative(outDir, filePath);
+  return rel.startsWith("..") || path.isAbsolute(rel) ? filePath : rel;
+}
+
+interface MutableImageEntry {
+  image_path?: string;
+  provider?: string;
+  query?: string;
+  source_url?: string;
+  creator?: string;
+  license?: string;
+}
+
+interface ParsedImageItemId {
+  topicIndex: number;
+  shotIndex?: number;
+  isCover: boolean;
+}
+
+function parseImageItemId(itemId: string): ParsedImageItemId {
+  const cover = /^topic_(\d+)_cover$/.exec(itemId);
+  if (cover) {
+    return {
+      topicIndex: Number(cover[1]),
+      isCover: true,
+    };
+  }
+  const shot = /^topic_(\d+)_shot_(\d+)$/.exec(itemId);
+  if (shot) {
+    return {
+      topicIndex: Number(shot[1]),
+      shotIndex: Number(shot[2]),
+      isCover: false,
+    };
+  }
+  throw new Error(`Invalid image review item id: ${itemId}`);
+}
+
+function locateImageEntry(artifact: unknown, itemId: string): MutableImageEntry {
+  if (!Array.isArray(artifact)) {
+    throw new Error("images artifact is not an array");
+  }
+
+  const parsed = parseImageItemId(itemId);
+  for (const topic of artifact) {
+    if (!topic || typeof topic !== "object") {
+      continue;
+    }
+    const typedTopic = topic as {
+      topic_index?: number;
+      cover?: MutableImageEntry;
+      shots?: Array<{ shot_index?: number } & MutableImageEntry>;
+    };
+    if (typedTopic.topic_index !== parsed.topicIndex) {
+      continue;
+    }
+
+    if (parsed.isCover) {
+      if (!typedTopic.cover || typeof typedTopic.cover !== "object") {
+        throw new Error(`Cover not found for ${itemId}`);
+      }
+      return typedTopic.cover;
+    }
+
+    const shots = Array.isArray(typedTopic.shots) ? typedTopic.shots : [];
+    const targetShot = shots.find((shot) => shot.shot_index === parsed.shotIndex);
+    if (!targetShot) {
+      throw new Error(`Shot not found for ${itemId}`);
+    }
+    return targetShot;
+  }
+
+  throw new Error(`Topic not found for ${itemId}`);
+}
+
+function resolveOutputImagePath(relativePath: string): string {
+  const outDir = resolveOutDir();
+  const absolutePath = path.resolve(outDir, relativePath);
+  const rel = path.relative(outDir, absolutePath);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`Invalid image path: ${relativePath}`);
+  }
+  return absolutePath;
+}
+
+export async function replaceImageForReviewItem(
+  videoId: string,
+  version: string,
+  itemId: string,
+  imageData: Uint8Array,
+): Promise<{ artifact: unknown; review: ReviewFile; imagePath: string }> {
+  const { artifact, review } = await getStageData(videoId, version, "images");
+  const entry = locateImageEntry(artifact, itemId);
+  const relativeImagePath = entry.image_path;
+  if (!relativeImagePath) {
+    throw new Error(`Image path missing for ${itemId}`);
+  }
+
+  const outputPath = resolveOutputImagePath(relativeImagePath);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, imageData);
+
+  entry.provider = "manual_upload";
+  entry.query = "manual_crop_replace";
+  entry.source_url = "";
+  entry.creator = "review_user";
+  entry.license = "user_provided";
+
+  const patchedItems: ReviewItem[] = review.items.map((item): ReviewItem => {
+    if (item.id !== itemId) {
+      return item;
+    }
+    return {
+      ...item,
+      status: "modified",
+      notes: item.notes || "Replaced by reviewer upload",
+    };
+  });
+
+  const updated = await updateStageData(videoId, version, "images", {
+    artifact,
+    review: {
+      status: "in_review",
+      items: patchedItems,
+    },
+  });
+
+  return {
+    artifact: updated.artifact,
+    review: updated.review,
+    imagePath: relativeImagePath,
+  };
+}
+
 async function listVersionSummaries(videoId: string, projectDir: string): Promise<VersionSummary[]> {
   const versions: VersionSummary[] = [];
 
@@ -358,13 +744,17 @@ async function buildVersionSummary(videoId: string, version: string, versionDir:
       reviewStatuses[stage] = review.status;
     }
   }
+  const flags = await readJsonFile<VersionFlags>(versionFlagsPath(videoId, version));
 
   const stats = await fs.stat(versionDir);
   return {
     version,
+    title: await inferVersionTitle(versionDir),
     doneStages,
     review: reviewStatuses,
     updatedAt: stats.mtime.toISOString(),
+    ignored: Boolean(flags?.ignored),
+    ignoredAt: flags?.ignored_at,
   };
 }
 
@@ -388,7 +778,7 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
     if (versions.length === 0) {
       continue;
     }
-    projects.push({ videoId, versions });
+    projects.push({ videoId, title: versions[0]?.title ?? videoId, versions });
   }
 
   projects.sort((a, b) => b.videoId.localeCompare(a.videoId));

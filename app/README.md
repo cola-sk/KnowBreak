@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-Default URL: `http://localhost:3000`
+Default URL: `http://localhost:8800`
 
 ## What It Does
 
@@ -21,6 +21,10 @@ Default URL: `http://localhost:3000`
   - `reviews/script_review.json`
   - `reviews/storyboard_review.json`
   - `reviews/image_review.json`
+- Image review supports:
+  - Upload replacement image
+  - Manual 9:16 crop with drag + zoom
+  - Paste image from clipboard (`Ctrl/Cmd + V`) in crop modal
 
 ## API
 
@@ -28,5 +32,6 @@ Default URL: `http://localhost:3000`
 - `GET/PUT /api/projects/:videoId/:version/script`
 - `GET/PUT /api/projects/:videoId/:version/storyboard`
 - `GET/PUT /api/projects/:videoId/:version/images`
+- `POST /api/projects/:videoId/:version/images/replace`
 - `POST /api/projects/:videoId/:version/reviews/:stage/approve`
 - `GET /api/assets/:path*` for local image preview

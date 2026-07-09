@@ -16,9 +16,10 @@ export default async function ScriptReviewPage({ params }: Props) {
       version,
       "script",
     )) as ScriptReviewPayload;
+    const title = initial.artifact.scripts[0]?.title;
     return (
       <main className="shell">
-        <StageHeader videoId={videoId} version={version} active="script" />
+        <StageHeader videoId={videoId} version={version} title={title} active="script" />
         <ScriptReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );

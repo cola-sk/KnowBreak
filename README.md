@@ -87,11 +87,11 @@ npm install
 npm run dev
 ```
 
-默认地址 `http://localhost:3000`，pipeline 会在终端打印当前审核链接。
+默认地址 `http://localhost:8800`，pipeline 会在终端打印当前审核链接。
 
 可选环境变量：
 
-- `KB_REVIEW_BASE_URL`：审核台地址（默认 `http://localhost:3000`）
+- `KB_REVIEW_BASE_URL`：审核台地址（默认 `http://localhost:8800`）
 - `KB_REVIEW_POLL_SECONDS`：轮询间隔秒数（默认 `3`）
 - `KB_REVIEW_WAIT_TIMEOUT`：等待超时秒数（默认 `0`，表示不超时）
 - `KB_REVIEW_AUTO_APPROVE`：设为 `1/true` 时自动通过审核闸门（适合 CI）
@@ -125,13 +125,13 @@ uv run knowbreak run "manual:_placeholder" --workflow topic_seed --topic "鼠疫
 params = { topic = "鼠疫是如何影响明朝历史进程的", hook = "崇祯六年的北京城，不是被攻破的，是被鼠疫掏空的。", angle = "从北京城人口与城防崩溃切入，串起鼠疫与明朝灭亡的因果链" }
 ```
 
-内置 `ming_plague` workflow 就是一个完整样例，还会把 `script` 阶段指向主题专属 prompt `prompts/ming_plague/script.md`，其余阶段沿用 profile 标准 prompt：
+内置 `topics/ming_plague` workflow 就是一个完整样例，还会把 `script` 阶段指向主题专属 prompt `prompts/topics/ming_plague/script.md`，其余阶段沿用 profile 标准 prompt：
 
 ```bash
-uv run knowbreak run "manual:_placeholder" --workflow ming_plague
+uv run knowbreak run "manual:_placeholder" --workflow topics/ming_plague
 ```
 
-workflow TOML 里每个 capability 可以选配 `prompt`（相对 profile 根的 `.md` 路径，如 `prompts/ming_plague/script.md`）和 `params`（stage 专属参数）。运行时会优先读 workflow 里的 prompt，没配则回退到 `profile.toml [prompts]` 绑定的标准 prompt；`workflow_plan.json` 里会记录每个 capability 实际用的 prompt 路径、inputs、outputs 和 params，便于追溯。
+workflow TOML 里每个 capability 可以选配 `prompt`（相对 profile 根的 `.md` 路径，如 `prompts/topics/ming_plague/script.md`） and `params`（stage 专属参数）。运行时会优先读 workflow 里的 prompt，没配则回退到 `profile.toml [prompts]` 绑定的标准 prompt；`workflow_plan.json` 里会记录每个 capability 实际用的 prompt 路径、inputs、outputs 和 params，便于追溯。
 
 默认内容风格是面向中国抖音/视频号的严肃科普：标题和开头有信息流抓力，但脚本保持克制、可信、强调误区纠偏、关键证据和可执行结论。
 
@@ -257,7 +257,7 @@ Workflow 和 profile 是两层配置：
 
 | 配置 | 作用 | 示例 |
 |---|---|---|
-| `profiles/<name>/workflows/*.toml` | 决定调用哪些能力、顺序是什么、每步输入输出是什么；可以在 capability 上覆写 `prompt` 路径和 `params` 参数 | `serious_science_one`、`rewrite_same_structure`、`topic_seed`、`ming_plague` |
+| `profiles/<name>/workflows/**/*.toml` | 决定调用哪些能力、顺序是什么、每步输入输出是什么；可以在 capability 上覆写 `prompt` 路径和 `params` 参数 | `serious_science_one`、`rewrite_same_structure`、`topic_seed`、`topics/ming_plague` |
 | `profiles/<name>/` | 一个完整创作方案包，包含 workflow、prompt、生成参数和成片样式 | `serious_science` |
 
 Python stage 代码不内置 LLM prompt；所有 LLM 能力必须在 `profile.toml [prompts]` 里绑定对应 `.md` 文件。缺失 prompt 会直接中断，避免静默走代码里的兜底文案。
@@ -280,7 +280,8 @@ profiles/
     │   ├── serious_science_one.toml   # 标准全流程：asr → extract → topics → ... → compose
     │   ├── rewrite_same_structure.toml # 按原结构洗稿：asr → rewrite → ... → compose
     │   ├── topic_seed.toml            # 通用主题 workflow：topic_seed → script → ... → compose
-    │   └── ming_plague.toml           # 主题绑定样例：topic/hook/angle 烤死在 params 里，script 用主题专属 prompt
+    │   └── topics/
+    │       └── ming_plague.toml       # 主题绑定样例：topic/hook/angle 烤死在 params 里，script 用主题专属 prompt
     └── prompts/
         ├── extract.md      # 长 prompt：知识点提取
         ├── topics.md       # 长 prompt：选题
@@ -290,8 +291,9 @@ profiles/
         ├── storyboard.md   # 长 prompt：分镜
         ├── assets.md       # 长 prompt：资源清单
         ├── images.md       # 长 prompt：配图关键词
-        └── ming_plague/
-            └── script.md   # 主题绑定 workflow 专属的 script prompt 覆写
+        └── topics/
+            └── ming_plague/
+                └── script.md   # 主题绑定 workflow 专属的 script prompt 覆写
 ```
 
 | 配置块 | 影响 | 典型可调项 |

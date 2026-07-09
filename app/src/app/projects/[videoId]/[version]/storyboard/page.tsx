@@ -19,9 +19,10 @@ export default async function StoryboardReviewPage({ params }: Props) {
       version,
       "storyboard",
     )) as StoryboardReviewPayload;
+    const title = initial.artifact.storyboards[0]?.title;
     return (
       <main className="shell">
-        <StageHeader videoId={videoId} version={version} active="storyboard" />
+        <StageHeader videoId={videoId} version={version} title={title} active="storyboard" />
         <StoryboardReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );

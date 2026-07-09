@@ -16,7 +16,7 @@ inputs = []
 outputs = ["topics.json"]
 
 [capabilities.script]
-prompt = "prompts/ming_plague/script.md"
+prompt = "prompts/topics/ming_plague/script.md"
 inputs = ["topics.json"]
 outputs = ["scripts.json"]
 

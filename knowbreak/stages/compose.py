@@ -161,18 +161,24 @@ def _render_subtitle_images(
         draw = ImageDraw.Draw(img)
 
         # 顶部标题
-        tw = draw.textlength(title, font=title_font)
-        draw.text(
-            ((style.video_w - tw) / 2, 70),
-            title,
-            font=title_font,
-            fill=style.title_color,
-            stroke_width=2,
-            stroke_fill=style.stroke_color,
-        )
+        max_title_width = style.video_w - 2 * style.text_side_margin
+        wrapped_title = _wrap_text(title, style.max_chars_per_line, title_font, max_title_width)
+        title_line_height = style.title_font_size + 8
+        title_start_y = 70
+        for j, tline in enumerate(wrapped_title):
+            tw = draw.textlength(tline, font=title_font)
+            draw.text(
+                ((style.video_w - tw) / 2, title_start_y + j * title_line_height),
+                tline,
+                font=title_font,
+                fill=style.title_color,
+                stroke_width=2,
+                stroke_fill=style.stroke_color,
+            )
 
         # 字幕正文
-        wrapped = _wrap_text(line.text, style.max_chars_per_line)
+        max_line_width = style.video_w - 2 * style.text_side_margin
+        wrapped = _wrap_text(line.text, style.max_chars_per_line, font, max_line_width)
         line_height = style.subtitle_font_size + 20
         total_h = len(wrapped) * line_height
         start_y = int(style.video_h * style.subtitle_center_ratio) - total_h // 2
@@ -257,7 +263,12 @@ def _render_intro_image(
         stroke_fill=style.stroke_color,
     )
 
-    wrapped = _wrap_text(title, style.cover_max_chars_per_line)
+    wrapped = _wrap_text(
+        title,
+        style.cover_max_chars_per_line,
+        title_font,
+        style.video_w - 2 * style.text_side_margin,
+    )
     line_height = style.cover_title_font_size + 18
     total_h = len(wrapped) * line_height
     start_y = title_center_y - total_h // 2
@@ -289,16 +300,36 @@ def _cover_crop(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
     return img.crop((left, top, left + target_w, top + target_h))
 
 
-def _wrap_text(text: str, max_chars: int) -> list[str]:
-    """中文按字符数硬换行；保留显式 \\n。"""
+def _wrap_text(text: str, max_chars: int, font=None, max_width: int | None = None) -> list[str]:
+    """中文按字符数硬换行；若提供 font + max_width，则按像素宽度兜底换行，
+    保证两侧至少留出 (video_w - max_width) / 2 的边距。保留显式 \\n。"""
     lines = []
     for seg in text.split("\n"):
-        while len(seg) > max_chars:
-            lines.append(seg[:max_chars])
-            seg = seg[max_chars:]
-        if seg:
-            lines.append(seg)
+        cur = ""
+        for ch in seg:
+            cand = cur + ch
+            too_long = len(cand) > max_chars
+            if not too_long and font is not None and max_width is not None:
+                too_long = too_long or draw_textlength(font, cand) > max_width
+            if too_long:
+                if cur:
+                    lines.append(cur)
+                cur = ch
+            else:
+                cur = cand
+        if cur:
+            lines.append(cur)
     return lines or [""]
+
+
+def draw_textlength(font, text: str) -> float:
+    """PIL font 在不绑定 draw 时也能测宽度（ImageFont 9+ 支持）。"""
+    try:
+        return font.getlength(text)
+    except AttributeError:
+        from PIL import Image, ImageDraw
+        tmp = Image.new("RGB", (10, 10))
+        return ImageDraw.Draw(tmp).textlength(text, font=font)
 
 
 def _render_video(
