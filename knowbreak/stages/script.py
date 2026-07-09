@@ -61,10 +61,10 @@ def run(topics_path: Path, cfg: Config) -> Scripts:
             if 0 <= i < len(knowledge.points)
         )
         schema = llm.chat_json(
-            _SYSTEM,
+            cfg.profile.prompts.script_system or _SYSTEM,
             f"选题标题：{topic.title}\n钩子方向：{topic.hook}\n切入角度：{topic.angle}\n目标时长：{topic.target_duration}s\n参考知识点：\n{points_blob}\n",
             _ScriptSchema,
-            temperature=0.8,
+            temperature=cfg.profile.generation.script_temperature,
         )
         total = sum(line.estimated_seconds for line in schema.lines)
         scripts.append(

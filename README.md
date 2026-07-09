@@ -39,6 +39,20 @@ out/<id>/compose/<topic>.mp4
 
 > 想要全自动跑到 MP4 用 `knowbreak run`；只想搭时间线在剪映/CapCut 里精修，跑到 `storyboard` 或 `assets` 即可。
 
+## 阶段执行策略
+
+| 阶段 | 输入 | 使用能力 | Profile prompt / 配置 | 执行策略 | 产出文件 | 版本目录规则 |
+|---|---|---|---|---|---|---|
+| 1. `asr` 字幕/转写 | 视频 URL、本地视频、`.srt` / `.vtt` / `.ass` 字幕 | `yt-dlp`、`ffmpeg`、OpenAI 兼容 ASR 或本地 `faster-whisper` | 不使用 profile prompt；ASR provider 在 `.env` 配置 | 优先使用本地同名字幕或 URL 自动字幕；没有字幕时下载/抽取音频为 16kHz 单声道 WAV，再走 ASR。OpenAI 兼容 ASR 会先尝试带 segment 时间戳，失败后回退为纯文本整段 segment。 | `audio.wav`、`transcript.json`、字幕文件；URL 源视频缓存为根目录 `source.mp4` | 版本模式下 `transcript.json` / `audio.wav` 放在版本目录；只有 `source.mp4` 可跨版本共享 |
+| 2. `extract` 知识点提取 | `transcript.json` | LLM JSON 结构化输出 | `prompts/extract.md` 作为 system prompt，在逐字稿渲染成时间戳文本后调用；定义知识点数量、字段、摘要和原文依据要求 | 把逐字稿渲染为带时间戳文本，要求 LLM 提炼 5-12 个知识点，每个知识点包含摘要、核心论断、示例和原文依据。 | `knowledge.json` | 版本化产物；不同 profile / prompt 下必须重新生成，不跨版本共享 |
+| 3. `topics` 选题拆分 | `knowledge.json` | LLM JSON 结构化输出 | `prompts/topics.md` 作为 system prompt，在知识点提取完成后调用；定义选题数量、标题、hook、angle、知识点引用和目标时长 | 基于知识点生成 3-5 个独立短视频选题；当前 prompt 偏中国抖音/视频号严肃科普，强调抓人标题、3 秒钩子、误区纠偏、证据和可执行结论。 | `topics.json` | 版本化产物，放在 `out/<video_id>/<version>/` |
+| 4. `script` 口播脚本 | `topics.json` + `knowledge.json` | LLM JSON 结构化输出 | `prompts/script.md` 作为 system prompt，对每个 topic 单独调用；定义口播结构、语气、禁用流量词、估算时长和 hashtag。严肃科普风格允许前 3 句以内适度卖关子，但要服务事实解释。`generation.script_temperature` 控制生成随机性 | 每个 topic 单独生成原创逐字口播脚本；按“强钩子 → 适度悬念 → 问题说明 → 误区/现象 → 数据/机制 → 行动建议”推进，并给出每句估算时长和 hashtag。 | `scripts.json` | 版本化产物 |
+| 5. `storyboard` 画面分镜 | `scripts.json` | LLM JSON 结构化输出 | `prompts/storyboard.md` 作为 system prompt，在脚本生成后调用；定义 shot 字段、画面风格、字幕密度和免版权画面要求。前 3 个 shot 以内可保留“常见认知 vs 真实原因”的悬念，但第 3 个 shot 内要进入事实解释 | 把口播拆成竖屏分镜，每个 shot 包含 narration、visual、broll、subtitle、duration；画面风格偏严肃科普的信息图、真人讲解、实拍和机制示意。LLM 超时或 JSON 异常时中断，不自动生成低质量兜底分镜。 | `storyboards.json` | 版本化产物 |
+| 6. `assets` 资源清单 | `storyboards.json` | LLM JSON 结构化输出 | `prompts/assets.md` 作为 system prompt，在分镜完成后调用；定义资源类型、描述、搜索关键词和版权约束 | 根据每个 topic 的分镜摘要生成 5-12 条资源建议，包含资源类型、具体描述、搜索关键词和可选来源 URL；用于人工精修或后续素材搜索。 | `assets.json` | 版本化产物 |
+| 7. `images` 自动配图 | `storyboards.json` | LLM 关键词生成、Pexels API、Pixabay API、HTTP 下载 | `prompts/images.md` 作为 system prompt，在请求图库前调用；把分镜转成英文 `cover_keywords` 和每个 shot 的搜索词，避免把比喻当字面素材 | 先让 LLM 为封面和每个 shot 生成英文搜索词，再按 `KB_IMAGE_PROVIDERS` 顺序查 Pexels/Pixabay，下载竖向大图；同 topic 内按 `source_url` 去重。关键词 LLM 失败会中断，provider 没结果才 fallback 到下一个图库。 | `images.json`、`images/<topic>/cover.jpg`、`images/<topic>/shot_<i>.jpg` | 版本化产物 |
+| 8. `tts` 配音 | `scripts.json` | TTS provider：`edge` / `openai` / `volcengine` / `volcengine_legacy` / `minimax`、`ffmpeg`、`ffprobe` | 不使用 profile prompt；TTS provider、音色、语速和模型在 `.env` 配置 | 逐句合成 `line_<i>.mp3`，探测每句真实时长，再用 ffmpeg concat 拼成每个 topic 的 `full.mp3`。非 edge provider 失败时切到 edge 继续，避免整条流水线卡死。当前火山新版 provider 按 `seed-tts-2.0` 单向流式接口解析音频 chunk。 | `tts.json`、`tts/<topic>/line_<i>.mp3`、`tts/<topic>/full.mp3` | 版本化产物 |
+| 9. `compose` 自动成片 | `tts.json` + `images.json` | PIL、系统字体、`ffmpeg`、`ffprobe` | 不使用 LLM prompt；读取 `profile.toml` 的 `[compose]`，控制品牌字、尺寸、颜色、字号、遮罩、字幕/封面位置和进度条 | 用 PIL 渲染开头标题封面、每句字幕 PNG、顶部标题条、底部进度条；按 TTS 实际时长生成 1080×1920 竖屏视频，音频延迟到封面结束后开始。没有图片时退化为纯色背景。 | `compose.json`、`compose/<topic>.mp4` | 版本化产物 |
+
 ## 一键执行（新视频最常用）
 
 配置好 `.env` 后（见下方 [配置](#配置)），一个新 YouTube 视频从下载到产出 N 个 MP4 只需一条命令：
@@ -71,7 +85,7 @@ uv run knowbreak list
 uv run knowbreak show <id>
 ```
 
-默认不启用版本层，产物仍写在 `out/<video_id>/`，`list` 中显示为 `legacy`。如果要在同一个视频下面保留多次成片版本，使用 `--version-mode`。版本模式下，`source.mp4`、`audio.wav`、`transcript.json`、`knowledge.json` 会放在 `out/<video_id>/` 根目录作为共享基础产物；`v001/v002/...` 只保存从选题开始的版本化产物。
+默认不启用版本层，产物仍写在 `out/<video_id>/`，`list` 中显示为 `legacy`。如果要在同一个视频下面保留多次成片版本，使用 `--version-mode`。版本模式下，只有 URL 下载得到的 `source.mp4` 会放在 `out/<video_id>/` 根目录作为跨版本缓存；`audio.wav`、`transcript.json`、`knowledge.json` 和后续所有产物都放在具体版本目录。因为 profile prompt 会影响 `extract` 结果，每次 `create` 都必须从头完整生成，不能带 `--from`。
 
 ```bash
 # 自动新建 out/<id>/v001；再次 create 会生成 v002、v003...
@@ -80,7 +94,7 @@ uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --version-mode c
 # 指定版本名新建
 uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --version-mode create --version draft-a
 
-# 覆盖更新已有版本；update 必须传 --version，避免误覆盖
+# 覆盖更新已有版本；update 必须传 --version，避免误覆盖，可从指定阶段续跑
 uv run knowbreak run "https://www.youtube.com/watch?v=VIDEO_ID" --version-mode update --version draft-a --from images
 
 # 查看某个版本
@@ -165,12 +179,45 @@ PIXABAY_API_KEY=...
 KB_IMAGE_PROVIDERS=pixabay,pexels
 ```
 
-每个成片默认会在开头插入一张标题封面图，封面图跟随 `KB_IMAGE_PROVIDERS` 顺序（默认 Pexels → Pixabay），音频会延迟到封面结束后再开始：
+每个成片默认会在开头插入一张标题封面图，封面图跟随 `KB_IMAGE_PROVIDERS` 顺序（默认 Pexels → Pixabay），音频会延迟到封面结束后再开始。封面开关和停留时长属于出片节奏参数，在 profile 的 `[intro]` 中配置。
+
+### 风格 Profile
+
+影响出片质量和观感的非固定参数集中放在 `profiles/<name>/`，`.env` 只负责选择哪套 profile：
 
 ```bash
-KB_INTRO_ENABLED=true
-KB_INTRO_DURATION=2.0
+KB_STYLE_PROFILE=serious_science
+# 或者临时指定一个实验配置
+# KB_STYLE_PROFILE_PATH=./profiles/my_style/profile.toml
 ```
+
+内置 `profiles/serious_science/` 是当前“中国抖音严肃科普”风格。要做多个视频类型，复制整个目录并改名，例如 `profiles/storytelling_science/`、`profiles/fast_news/`，再在 `.env` 中切换。
+
+```text
+profiles/
+└── serious_science/
+    ├── profile.toml        # 短参数：temperature、颜色、字号、位置等
+    └── prompts/
+        ├── extract.md      # 长 prompt：知识点提取
+        ├── topics.md       # 长 prompt：选题
+        ├── script.md       # 长 prompt：口播脚本
+        ├── storyboard.md   # 长 prompt：分镜
+        ├── assets.md       # 长 prompt：资源清单
+        └── images.md       # 长 prompt：配图关键词
+```
+
+| 配置块 | 影响 | 典型可调项 |
+|---|---|---|
+| `prompts` | LLM 怎么提知识点、选题、写脚本、拆分镜、生成配图搜索词 | 在 `profile.toml` 里引用 `prompts/topics.md`、`prompts/script.md` 等 |
+| `generation` | 每个 LLM 阶段的生成随机性 | `script_temperature`、`topics_temperature`、`images_temperature` |
+| `intro` | 开头标题封面是否启用、停留时长 | `enabled`、`duration` |
+| `compose` | 最终 MP4 的视觉样式 | 品牌字、尺寸、字体大小、字幕每行字数、遮罩透明度、封面/字幕纵向位置、进度条颜色 |
+
+配置边界：
+
+| 放在 `.env` | 放在 `profiles/<name>/` |
+|---|---|
+| API key、provider、模型地址、输出目录、cookies、图片/TTS provider 顺序 | prompt md 文件、文案风格、生成温度、封面开关和时长、封面样式、字幕样式、品牌字、颜色、版式位置 |
 
 ## 快速开始
 
@@ -207,15 +254,15 @@ out/<video_id>/
     └── <topic>.mp4     # 最终成片：1080×1920 竖屏
 ```
 
-如果使用版本模式，目录结构会变成共享基础产物 + 多个版本目录：
+如果使用版本模式，目录结构会变成源文件缓存 + 多个完整版本目录：
 
 ```text
 out/<video_id>/
-├── source.mp4          # 共享：原视频
-├── audio.wav           # 共享：原视频音频
-├── transcript.json     # 共享：字幕/ASR 转写结果
-├── knowledge.json      # 共享：知识点提取
+├── source.mp4          # 可选共享：URL 下载得到的原视频缓存；本地文件输入不一定会复制到这里
 ├── v001/
+│   ├── audio.wav
+│   ├── transcript.json
+│   ├── knowledge.json
 │   ├── topics.json
 │   ├── scripts.json
 │   ├── storyboards.json
@@ -227,16 +274,22 @@ out/<video_id>/
     └── ...
 ```
 
+`create` 模式用于新建一个完整版本，必须从 `asr` 跑到 `compose`。如果只是微调某个阶段，用 `update --from` 或单阶段命令覆盖已有版本。
+
 断点续跑：
 
 ```bash
-# 例如 transcript.json 已经生成，只想从知识点提取继续
+# legacy 模式：例如 transcript.json 已经生成，只想从知识点提取继续
 uv run knowbreak run ./inputs/source.mp4 --from extract
+
+# 版本模式：覆盖更新已有版本，从指定阶段继续
+uv run knowbreak run ./inputs/source.mp4 --version-mode update --version v002 --from script
 ```
 
 单阶段调试：
 
 ```bash
+# legacy 路径
 uv run knowbreak asr ./inputs/source.mp4
 uv run knowbreak extract ./out/<id>/transcript.json
 uv run knowbreak topics ./out/<id>/knowledge.json
@@ -249,12 +302,36 @@ uv run knowbreak tts ./out/<id>/scripts.json
 uv run knowbreak compose ./out/<id>/tts.json                   # 全部选题
 uv run knowbreak compose ./out/<id>/tts.json --topic 4         # 只生成一个 MP4
 
+# 版本路径，把 v002 替换成目标版本
+uv run knowbreak extract ./out/<id>/v002/transcript.json
+uv run knowbreak topics ./out/<id>/v002/knowledge.json
+uv run knowbreak script ./out/<id>/v002/topics.json
+uv run knowbreak storyboard ./out/<id>/v002/scripts.json
+uv run knowbreak assets ./out/<id>/v002/storyboards.json
+uv run knowbreak images ./out/<id>/v002/storyboards.json --topic 4
+uv run knowbreak tts ./out/<id>/v002/scripts.json
+uv run knowbreak compose ./out/<id>/v002/tts.json --topic 4
+
 uv run knowbreak list
 uv run knowbreak show <id>
-uv run knowbreak show <id> --stage script
+uv run knowbreak show <id> --version v002 --stage script
 ```
 
 `images` 和 `compose` 都支持 `--topic`，便于先验证单题质量再批量跑，省图片 API 配额。
+
+局部微调时按影响范围重跑：
+
+| 改动内容 | 建议命令 |
+|---|---|
+| 只改封面图 | `uv run knowbreak images ./out/<id>/<version>/storyboards.json --topic 0 --cover-only`，然后 `compose --topic 0` |
+| 只改分镜配图 | `uv run knowbreak images ./out/<id>/<version>/storyboards.json --topic 0`，然后 `compose --topic 0` |
+| 只改成片视觉参数 `[compose]` | `uv run knowbreak compose ./out/<id>/<version>/tts.json --topic 0` |
+| 只改 TTS provider / 音色 | `uv run knowbreak tts ./out/<id>/<version>/scripts.json`，然后 `compose` |
+| 改 `prompts/script.md` | `script → storyboard → images → tts → compose` |
+| 改 `prompts/storyboard.md` | `storyboard → assets/images → compose`，如果口播没变通常不用重跑 TTS |
+| 改 `prompts/images.md` | `images → compose` |
+| 改 `prompts/topics.md` | `topics → script → storyboard → assets/images → tts → compose` |
+| 改 `prompts/extract.md` | `extract → topics → script → storyboard → assets/images → tts → compose` |
 
 ### 单题重跑封面/配图
 
@@ -443,7 +520,7 @@ uv run knowbreak run "https://www.youtube.com/watch?v=XA42XDEJcTE"
 **输入**：25 分钟（1507s）中文科普视频，主题"牛奶与补钙"
 **总耗时**：约 15 分钟（视频下载 + ASR 转写 + 5 轮 LLM 调用 + 图片获取 + TTS + 成片）
 
-**产出**（legacy 模式在 `out/<video_id>/` 下；版本模式下 asr/extract 在 `out/<video_id>/`，后续阶段在 `out/<video_id>/<version>/`）：
+**产出**（legacy 模式在 `out/<video_id>/` 下；版本模式下所有生成产物都在 `out/<video_id>/<version>/`；根目录只缓存 URL 源视频 `source.mp4`）：
 
 | 阶段 | 文件 | 大小 | 内容 |
 |---|---|---|---|
@@ -586,7 +663,7 @@ KB_MINIMAX_TTS_VOICE_ID=Chinese (Mandarin)_News_Anchor
 │      [封面图背景]        │
 │  知点拆解局              │
 │                          │
-│        大标题            │  ← 默认 2 秒，音频延迟到封面后起播
+│        大标题            │  ← 时长由 profile.toml 的 [intro].duration 控制，音频延迟到封面后起播
 └─────────────────────────┘
           ↓
 ┌─────────────────────────┐
@@ -602,18 +679,21 @@ KB_MINIMAX_TTS_VOICE_ID=Chinese (Mandarin)_News_Anchor
 └─────────────────────────┘
 ```
 
-**关键参数**（在 `knowbreak/stages/compose.py` 顶部常量）：
+**关键参数**（在 `profiles/<style>/profile.toml` 的 `compose` 配置块）：
 
-| 常量 | 默认 | 调整建议 |
+| 参数 | 默认 | 调整建议 |
 |---|---|---|
-| `VIDEO_W/H` | 1080×1920 | 抖音/视频号标准竖屏，一般不动 |
-| `BG_COLOR` | `(14,14,18)` | 无配图时的背景色 |
-| `SUBTITLE_FONT_SIZE` | 62 | 字太大改小，看不清改大 |
-| `TITLE_FONT_SIZE` | 38 | 顶部标题 |
-| `COVER_TITLE_FONT_SIZE` | 88 | 开头封面大标题 |
-| `MAX_CHARS_PER_LINE` | 16 | 中文每行字数，超出自动换行 |
-| `TOP_BAR_ALPHA` | 170 | 顶部标题条透明度，越大越暗 |
-| `BOTTOM_OVERLAY_ALPHA` | 150 | 字幕区遮罩，越大字幕越清晰 |
+| `video_w` / `video_h` | 1080×1920 | 抖音/视频号标准竖屏，一般不动 |
+| `bg_color` | `[14,14,18]` | 无配图时的背景色 |
+| `subtitle_font_size` | 62 | 字太大改小，看不清改大 |
+| `title_font_size` | 38 | 顶部标题 |
+| `cover_title_font_size` | 88 | 开头封面大标题 |
+| `max_chars_per_line` | 16 | 中文每行字数，超出自动换行 |
+| `top_bar_alpha` | 170 | 顶部标题条透明度，越大越暗 |
+| `bottom_overlay_alpha` | 150 | 字幕区遮罩，越大字幕越清晰 |
+| `subtitle_center_ratio` | 0.45 | 正文字幕的纵向位置，越大越靠下 |
+| `cover_title_center_ratio` | 0.45 | 封面大标题的纵向位置 |
+| `brand` | `知点拆解局` | 封面左上品牌字 |
 
 **字体**：自动探测 PingFang → STHeiti Medium → Hiragino Sans GB → Arial Unicode 的顺序，第一个能 PIL 打开的就用。在新版 macOS 上 PingFang.ttc 在私有路径下 PIL 打不开，会自动降级到 STHeiti Medium。
 
@@ -627,16 +707,20 @@ uv run knowbreak compose ./out/<id>/tts.json --topic 4
 
 会保留 `compose.json` 里其他 topic 的记录，只重渲染指定 topic 的 MP4。改了字幕样式/字体后调试很省时间。
 
-如果只想关掉开头封面：
+如果只想关掉开头封面，在 `profiles/<style>/profile.toml` 中修改：
 
-```bash
-KB_INTRO_ENABLED=false
+```toml
+[intro]
+enabled = false
+duration = 2.0
 ```
 
 如果想调整封面停留时间：
 
-```bash
-KB_INTRO_DURATION=1.5
+```toml
+[intro]
+enabled = true
+duration = 1.5
 ```
 
 ## 项目结构
@@ -651,6 +735,7 @@ KnowBreak/
 │   ├── pipeline.py         # 流水线编排
 │   ├── models.py           # 数据模型（pydantic）
 │   ├── llm.py              # LLM 客户端
+│   ├── style_profile.py    # 风格 profile 加载与校验
 │   └── stages/
 │       ├── asr.py          # 1. 字幕优先，失败后语音转写
 │       ├── extract.py      # 2. 知识点提取
@@ -661,6 +746,7 @@ KnowBreak/
 │       ├── images.py       # 7. 图片获取（Pexels/Pixabay）
 │       ├── tts.py          # 8. 多 provider TTS 配音
 │       └── compose.py      # 9. 自动成片（PIL + ffmpeg）
+├── profiles/               # prompt、文案风格、成片视觉参数
 ├── out/                    # 产出（按 video id 分目录）
 └── tests/
 ```
@@ -705,11 +791,13 @@ brew install ffmpeg
 
 ### 想重新跑某个阶段
 
-删除对应阶段及其后续产物，或使用 `--from` 从某阶段续跑：
+legacy 模式可以删除对应阶段及其后续产物，或使用 `--from` 从某阶段续跑：
 
 ```bash
 uv run knowbreak run ./inputs/source.mp4 --from script
 ```
+
+版本模式下，`create` 永远完整新建版本；要覆盖已有版本，用 `update --version <version> --from <stage>`，或者使用上文的单阶段命令精确覆盖某个文件。
 
 ### 不想调用 ASR
 

@@ -50,9 +50,10 @@ def run(knowledge_path: Path, cfg: Config, output_dir: Path | None = None) -> To
     )
     llm = LLM(cfg.llm)
     schema = llm.chat_json(
-        _SYSTEM,
+        cfg.profile.prompts.topics_system or _SYSTEM,
         f"原视频主题：{knowledge.title}\n知识点列表：\n{points_blob}\n",
         _TopicsSchema,
+        temperature=cfg.profile.generation.topics_temperature,
     )
     topics = Topics(
         video_id=knowledge.video_id,

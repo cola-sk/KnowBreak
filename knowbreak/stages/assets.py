@@ -48,9 +48,10 @@ def run(storyboards_path: Path, cfg: Config) -> list[AssetList]:
             f"- 画面: {s.visual} | B-roll: {s.broll}" for s in board.shots
         )
         schema = llm.chat_json(
-            _SYSTEM,
+            cfg.profile.prompts.assets_system or _SYSTEM,
             f"选题：{board.title}\n分镜摘要：\n{shots_blob}\n",
             _AssetsSchema,
+            temperature=cfg.profile.generation.assets_temperature,
         )
         out.append(
             AssetList(

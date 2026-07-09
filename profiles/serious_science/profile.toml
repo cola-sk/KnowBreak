@@ -1,0 +1,49 @@
+name = "serious_science"
+description = "中国抖音严肃科普风格：标题抓人，内容克制可信，画面适合竖屏信息流。"
+
+[prompts]
+extract_system = "prompts/extract.md"
+topics_system = "prompts/topics.md"
+script_system = "prompts/script.md"
+storyboard_system = "prompts/storyboard.md"
+assets_system = "prompts/assets.md"
+images_system = "prompts/images.md"
+
+[generation]
+script_temperature = 0.8
+
+[intro]
+enabled = true
+duration = 2.0
+
+[compose]
+brand = "知点拆解局"
+video_w = 1080
+video_h = 1920
+bg_color = [14, 14, 18]
+title_color = [220, 220, 224]
+text_color = [255, 255, 255]
+stroke_color = [0, 0, 0]
+cover_brand_color = [235, 235, 238]
+cover_title_color = [255, 255, 255]
+progress_bg_color = [40, 40, 50]
+progress_fg_color = [120, 160, 240]
+subtitle_font_size = 62
+title_font_size = 38
+cover_title_font_size = 88
+cover_brand_font_size = 36
+max_chars_per_line = 16
+cover_max_chars_per_line = 10
+top_bar_alpha = 170
+bottom_overlay_alpha = 150
+cover_overlay_alpha = 120
+cover_title_overlay_alpha = 175
+subtitle_center_ratio = 0.45
+cover_title_center_ratio = 0.45
+progress_bar_ratio = 0.59
+progress_bar_width_ratio = 0.6
+cover_brand_y = 200
+top_bar_height = 150
+top_gradient_height = 70
+subtitle_overlay_half_height = 220
+cover_title_overlay_half_height = 260

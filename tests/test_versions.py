@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from knowbreak.config import ASRConfig, Config, IntroConfig, LLMConfig, TTSConfig
-from knowbreak.pipeline import artifact_path, resolve_project_run_dir
+from knowbreak.pipeline import artifact_path, resolve_project_run_dir, run_full
 from knowbreak.stages.compose import _load_images_map
 
 
@@ -47,14 +47,21 @@ def test_artifact_path_supports_version(tmp_path: Path) -> None:
     cfg = _config(tmp_path / "out")
 
     assert artifact_path("video123", "asr", cfg, version="v001") == (
-        tmp_path / "out" / "video123" / "transcript.json"
+        tmp_path / "out" / "video123" / "v001" / "transcript.json"
     )
     assert artifact_path("video123", "extract", cfg, version="v001") == (
-        tmp_path / "out" / "video123" / "knowledge.json"
+        tmp_path / "out" / "video123" / "v001" / "knowledge.json"
     )
     assert artifact_path("video123", "script", cfg, version="v001") == (
         tmp_path / "out" / "video123" / "v001" / "scripts.json"
     )
+
+
+def test_create_version_disallows_start_from(tmp_path: Path) -> None:
+    cfg = _config(tmp_path / "out")
+
+    with pytest.raises(ValueError, match="create 模式必须从头完整生成"):
+        run_full("video123", cfg, start_from="extract", version_mode="create")
 
 
 def test_compose_loads_versioned_image_paths(tmp_path: Path) -> None:

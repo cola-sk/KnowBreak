@@ -40,9 +40,10 @@ def run(transcript_path: Path, cfg: Config) -> Knowledge:
     full_text = _render_transcript(transcript)
     llm = LLM(cfg.llm)
     schema = llm.chat_json(
-        _SYSTEM,
+        cfg.profile.prompts.extract_system or _SYSTEM,
         f"视频逐字稿（duration={transcript.duration}s）：\n\n{full_text}",
         _ExtractSchema,
+        temperature=cfg.profile.generation.extract_temperature,
     )
     knowledge = Knowledge(
         video_id=transcript.video_id,

@@ -15,7 +15,7 @@ from .stages._common import project_dir, project_version_dir, video_id_from_sour
 console = Console()
 
 STAGES = ["asr", "extract", "topics", "script", "storyboard", "assets", "images", "tts", "compose"]
-SHARED_STAGES = {"asr", "extract"}
+SHARED_STAGES: set[str] = set()
 VersionMode = Literal["legacy", "create", "update"]
 
 
@@ -27,21 +27,23 @@ def run_full(
     version: str | None = None,
 ) -> tuple[str, str | None]:
     """全流程跑一个视频。返回 video_id。"""
+    if version_mode == "create" and start_from is not None:
+        raise ValueError("create 模式必须从头完整生成；局部重跑请使用 update --from 或单阶段命令")
     video_id = video_id_from_source(source)
     pdir, resolved_version = resolve_project_run_dir(cfg, video_id, version_mode, version)
-    shared_dir = project_dir(cfg.out_dir, video_id) if resolved_version else pdir
+    source_cache_dir = project_dir(cfg.out_dir, video_id) if resolved_version else None
 
     start_idx = 0 if start_from is None else STAGES.index(start_from)
 
     if start_idx <= 0:
         console.print(f"[cyan]▸ 阶段 1/9 字幕/ASR 转写[/]: {source}")
-        asr.run(source, cfg, pdir=shared_dir)
+        asr.run(source, cfg, pdir=pdir, source_cache_dir=source_cache_dir)
     if start_idx <= 1:
         console.print("[cyan]▸ 阶段 2/9 知识点提取[/]")
-        extract.run(shared_dir / "transcript.json", cfg)
+        extract.run(pdir / "transcript.json", cfg)
     if start_idx <= 2:
         console.print("[cyan]▸ 阶段 3/9 选题拆分[/]")
-        topics.run(shared_dir / "knowledge.json", cfg, output_dir=pdir)
+        topics.run(pdir / "knowledge.json", cfg, output_dir=pdir)
     if start_idx <= 3:
         console.print("[cyan]▸ 阶段 4/9 口播脚本[/]")
         script.run(pdir / "topics.json", cfg)
@@ -118,8 +120,8 @@ def artifact_path(video_id: str, stage: str, cfg: Config, version: str | None = 
     project = project_dir(cfg.out_dir, video_id)
     pdir = project if version is None or stage in SHARED_STAGES else project / version
     return {
-        "asr": project / "transcript.json",
-        "extract": project / "knowledge.json",
+        "asr": pdir / "transcript.json",
+        "extract": pdir / "knowledge.json",
         "topics": pdir / "topics.json",
         "script": pdir / "scripts.json",
         "storyboard": pdir / "storyboards.json",

@@ -40,6 +40,8 @@ def run(
     cfg = load_config()
     if version_mode not in {"legacy", "create", "update"}:
         raise typer.BadParameter("--version-mode 只能是 legacy/create/update")
+    if version_mode == "create" and resume is not None:
+        raise typer.BadParameter("create 模式必须从头完整生成；局部重跑请使用 update --from 或单阶段命令")
     vid, resolved_version = run_full(
         source,
         cfg,

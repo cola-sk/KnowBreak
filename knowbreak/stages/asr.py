@@ -22,7 +22,12 @@ SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass"}
 SUBTITLE_LANGS = "zh-Hans,zh-CN,zh-Hant,zh,en"
 
 
-def run(source: str, cfg: Config, pdir: Path | None = None) -> Transcript:
+def run(
+    source: str,
+    cfg: Config,
+    pdir: Path | None = None,
+    source_cache_dir: Path | None = None,
+) -> Transcript:
     video_id = video_id_from_source(source)
     pdir = pdir or project_dir(cfg.out_dir, video_id)
 
@@ -33,7 +38,7 @@ def run(source: str, cfg: Config, pdir: Path | None = None) -> Transcript:
         method = "subtitle"
         transcript_source = str(subtitle_path)
     else:
-        audio_path = _ensure_audio(source, pdir, cfg)
+        audio_path = _ensure_audio(source, pdir, cfg, source_cache_dir=source_cache_dir)
         segments = _transcribe(audio_path, cfg)
         method = "asr"
         transcript_source = str(audio_path)
@@ -138,9 +143,16 @@ def _best_subtitle_candidate(pdir: Path) -> Path | None:
     return sorted(candidates, key=score)[0]
 
 
-def _ensure_audio(source: str, pdir: Path, cfg: Config) -> Path:
+def _ensure_audio(
+    source: str,
+    pdir: Path,
+    cfg: Config,
+    source_cache_dir: Path | None = None,
+) -> Path:
     """返回 16kHz 单声道 wav 路径。"""
-    raw = pdir / "source.mp4"
+    raw_dir = source_cache_dir or pdir
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw = raw_dir / "source.mp4"
     wav = pdir / "audio.wav"
 
     if not raw.exists():

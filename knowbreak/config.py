@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from .style_profile import StyleProfile, load_style_profile
 
 load_dotenv()
 
@@ -72,6 +74,7 @@ class Config:
     intro: IntroConfig
     out_dir: Path
     project_root: Path
+    profile: StyleProfile = field(default_factory=StyleProfile)
     cookies_browser: str | None = None  # yt-dlp --cookies-from-browser: chrome/safari/firefox/brave/edge
     cookies_file: Path | None = None  # yt-dlp --cookies: 优先于 cookies_browser
     image_providers: tuple[str, ...] = ("pexels", "pixabay")
@@ -110,13 +113,6 @@ def _image_providers() -> tuple[str, ...]:
     return providers or ("pexels", "pixabay")
 
 
-def _bool_env(key: str, default: bool) -> bool:
-    v = os.getenv(key)
-    if v is None:
-        return default
-    return v.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
 def _float_env(key: str, default: float) -> float:
     v = os.getenv(key)
     if not v:
@@ -136,6 +132,11 @@ def _tts_speed() -> float:
 
 def load_config() -> Config:
     project_root = Path(__file__).resolve().parent.parent
+    profile = load_style_profile(
+        project_root,
+        _env("KB_STYLE_PROFILE", "serious_science"),
+        _optional_env("KB_STYLE_PROFILE_PATH"),
+    )
     return Config(
         llm=LLMConfig(
             base_url=_env("KB_LLM_BASE_URL"),
@@ -185,9 +186,10 @@ def load_config() -> Config:
             minimax_url=_env("KB_MINIMAX_TTS_URL", "https://api.minimaxi.com/v1/t2a_v2"),
         ),
         intro=IntroConfig(
-            enabled=_bool_env("KB_INTRO_ENABLED", True),
-            duration=_float_env("KB_INTRO_DURATION", 2.0),
+            enabled=profile.intro.enabled,
+            duration=profile.intro.duration,
         ),
+        profile=profile,
         out_dir=Path(_env("KB_OUT_DIR", "./out")).resolve(),
         project_root=project_root,
         cookies_browser=_optional_env("KB_COOKIES_BROWSER"),

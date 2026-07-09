@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..config import Config
 from ..models import TTSResult
+from ..style_profile import ComposeProfile
 
 _FONT_CANDIDATES = [
     "/System/Library/Fonts/PingFang.ttc",
@@ -26,24 +27,6 @@ _FONT_CANDIDATES = [
 ]
 DEFAULT_FONT_PATH = next((p for p in _FONT_CANDIDATES if Path(p).exists()), None)
 TITLE_FONT_PATH = DEFAULT_FONT_PATH
-
-VIDEO_W = 1080
-VIDEO_H = 1920
-BG_COLOR = (14, 14, 18)  # 0x0E0E12 无图时背景
-TITLE_COLOR = (220, 220, 224)
-TEXT_COLOR = (255, 255, 255)
-STROKE_COLOR = (0, 0, 0)
-
-SUBTITLE_FONT_SIZE = 62
-TITLE_FONT_SIZE = 38
-COVER_TITLE_FONT_SIZE = 88
-COVER_BRAND_FONT_SIZE = 36
-MAX_CHARS_PER_LINE = 16  # 中文每行最多字符数，超出换行
-
-# 遮罩透明度（0-255），越大字幕越清晰但背景越暗
-TOP_BAR_ALPHA = 170      # 顶部标题条
-BOTTOM_OVERLAY_ALPHA = 150  # 字幕区底部遮罩
-COVER_OVERLAY_ALPHA = 120
 
 
 def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
@@ -64,13 +47,13 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
         shot_imgs = images_map.get(script.topic_index, {})
         cover_img = cover_map.get(script.topic_index)
         images = _render_subtitle_images(
-            script_dir, script.title, script.lines, shot_imgs, cfg.out_dir
+            script_dir, script.title, script.lines, shot_imgs, cfg.profile.compose
         )
         durations = _line_durations(script_dir)
         intro_duration = cfg.intro.duration if cfg.intro.enabled else 0.0
         intro_image = None
         if intro_duration > 0:
-            intro_image = _render_intro_image(script_dir, script.title, cover_img)
+            intro_image = _render_intro_image(script_dir, script.title, cover_img, cfg.profile.compose)
             images.insert(0, intro_image)
             durations.insert(0, intro_duration)
         mp4_path = compose_dir / f"{script.topic_index}.mp4"
@@ -126,13 +109,18 @@ def _load_images_map(path: Path, out_dir: Path) -> tuple[dict[int, dict[int, str
     return result, covers
 
 
-def _render_subtitle_images(script_dir: Path, title: str, lines,
-                            shot_imgs: dict[int, str], out_dir: Path) -> list[Path]:
+def _render_subtitle_images(
+    script_dir: Path,
+    title: str,
+    lines,
+    shot_imgs: dict[int, str],
+    style: ComposeProfile,
+) -> list[Path]:
     """每句生成一张 1080x1920 PNG：可选配图背景 + 顶部标题条 + 居中字幕 + 底部进度条。"""
     if DEFAULT_FONT_PATH is None:
         raise RuntimeError("找不到可用的 CJK 字体，请安装 PingFang/STHeiti/Hiragino 之一")
-    font = ImageFont.truetype(DEFAULT_FONT_PATH, SUBTITLE_FONT_SIZE)
-    title_font = ImageFont.truetype(TITLE_FONT_PATH, TITLE_FONT_SIZE)
+    font = ImageFont.truetype(DEFAULT_FONT_PATH, style.subtitle_font_size)
+    title_font = ImageFont.truetype(TITLE_FONT_PATH, style.title_font_size)
 
     paths = []
     n = len(lines)
@@ -141,58 +129,78 @@ def _render_subtitle_images(script_dir: Path, title: str, lines,
         if bg_path and Path(bg_path).exists():
             try:
                 bg = Image.open(bg_path).convert("RGB")
-                img = _cover_crop(bg, VIDEO_W, VIDEO_H)
+                img = _cover_crop(bg, style.video_w, style.video_h)
             except Exception:
-                img = Image.new("RGB", (VIDEO_W, VIDEO_H), BG_COLOR)
+                img = Image.new("RGB", (style.video_w, style.video_h), style.bg_color)
         else:
-            img = Image.new("RGB", (VIDEO_W, VIDEO_H), BG_COLOR)
+            img = Image.new("RGB", (style.video_w, style.video_h), style.bg_color)
 
-        # 半透明遮罩层（顶部标题条 + 底部字幕区）
-        overlay = Image.new("RGBA", (VIDEO_W, VIDEO_H), (0, 0, 0, 0))
+        # 半透明遮罩层（顶部标题条 + 字幕区横带，跟随居中偏上的字幕位置）
+        overlay = Image.new("RGBA", (style.video_w, style.video_h), (0, 0, 0, 0))
         od = ImageDraw.Draw(overlay)
-        od.rectangle([0, 0, VIDEO_W, 150], fill=(0, 0, 0, TOP_BAR_ALPHA))
-        od.rectangle([0, VIDEO_H - 700, VIDEO_W, VIDEO_H],
-                     fill=(0, 0, 0, BOTTOM_OVERLAY_ALPHA))
+        od.rectangle(
+            [0, 0, style.video_w, style.top_bar_height],
+            fill=(0, 0, 0, style.top_bar_alpha),
+        )
+        sub_center_y = int(style.video_h * style.subtitle_center_ratio)
+        od.rectangle(
+            [
+                0,
+                sub_center_y - style.subtitle_overlay_half_height,
+                style.video_w,
+                sub_center_y + style.subtitle_overlay_half_height,
+            ],
+            fill=(0, 0, 0, style.bottom_overlay_alpha),
+        )
         # 顶部渐变（让标题条边缘更柔和）
-        for y in range(150, 220):
-            alpha = int(TOP_BAR_ALPHA * (1 - (y - 150) / 70))
-            od.rectangle([0, y, VIDEO_W, y + 1], fill=(0, 0, 0, alpha))
+        gradient_end = style.top_bar_height + style.top_gradient_height
+        for y in range(style.top_bar_height, gradient_end):
+            alpha = int(style.top_bar_alpha * (1 - (y - style.top_bar_height) / style.top_gradient_height))
+            od.rectangle([0, y, style.video_w, y + 1], fill=(0, 0, 0, alpha))
         img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
         draw = ImageDraw.Draw(img)
 
         # 顶部标题
         tw = draw.textlength(title, font=title_font)
         draw.text(
-            ((VIDEO_W - tw) / 2, 70), title,
-            font=title_font, fill=TITLE_COLOR,
-            stroke_width=2, stroke_fill=STROKE_COLOR,
+            ((style.video_w - tw) / 2, 70),
+            title,
+            font=title_font,
+            fill=style.title_color,
+            stroke_width=2,
+            stroke_fill=style.stroke_color,
         )
 
         # 字幕正文
-        wrapped = _wrap_text(line.text, MAX_CHARS_PER_LINE)
-        line_height = SUBTITLE_FONT_SIZE + 20
+        wrapped = _wrap_text(line.text, style.max_chars_per_line)
+        line_height = style.subtitle_font_size + 20
         total_h = len(wrapped) * line_height
-        start_y = (VIDEO_H * 2) // 3 - total_h // 2
+        start_y = int(style.video_h * style.subtitle_center_ratio) - total_h // 2
         for j, text_line in enumerate(wrapped):
             lw = draw.textlength(text_line, font=font)
             draw.text(
-                ((VIDEO_W - lw) / 2, start_y + j * line_height),
-                text_line, font=font, fill=TEXT_COLOR,
-                stroke_width=4, stroke_fill=STROKE_COLOR,
+                ((style.video_w - lw) / 2, start_y + j * line_height),
+                text_line,
+                font=font,
+                fill=style.text_color,
+                stroke_width=4,
+                stroke_fill=style.stroke_color,
             )
 
-        # 底部进度条
+        # 进度条
         progress = (i + 1) / n
-        bar_w = int(VIDEO_W * 0.6)
-        bar_x = (VIDEO_W - bar_w) // 2
-        bar_y = VIDEO_H - 120
+        bar_w = int(style.video_w * style.progress_bar_width_ratio)
+        bar_x = (style.video_w - bar_w) // 2
+        bar_y = int(style.video_h * style.progress_bar_ratio)
         draw.rounded_rectangle(
             [bar_x, bar_y, bar_x + bar_w, bar_y + 8],
-            radius=4, fill=(40, 40, 50),
+            radius=4,
+            fill=style.progress_bg_color,
         )
         draw.rounded_rectangle(
             [bar_x, bar_y, bar_x + int(bar_w * progress), bar_y + 8],
-            radius=4, fill=(120, 160, 240),
+            radius=4,
+            fill=style.progress_fg_color,
         )
 
         out = script_dir / f"img_{i:03d}.png"
@@ -201,49 +209,66 @@ def _render_subtitle_images(script_dir: Path, title: str, lines,
     return paths
 
 
-def _render_intro_image(script_dir: Path, title: str, cover_img: str | None) -> Path:
-    """生成视频开头 2 秒封面：大标题 + 竖图背景。"""
+def _render_intro_image(
+    script_dir: Path,
+    title: str,
+    cover_img: str | None,
+    style: ComposeProfile,
+) -> Path:
+    """生成视频开头封面：大标题 + 竖图背景，停留时长由 profile [intro] 控制。"""
     if DEFAULT_FONT_PATH is None:
         raise RuntimeError("找不到可用的 CJK 字体，请安装 PingFang/STHeiti/Hiragino 之一")
     if cover_img and Path(cover_img).exists():
         try:
             bg = Image.open(cover_img).convert("RGB")
-            img = _cover_crop(bg, VIDEO_W, VIDEO_H)
+            img = _cover_crop(bg, style.video_w, style.video_h)
         except Exception:
-            img = Image.new("RGB", (VIDEO_W, VIDEO_H), BG_COLOR)
+            img = Image.new("RGB", (style.video_w, style.video_h), style.bg_color)
     else:
-        img = Image.new("RGB", (VIDEO_W, VIDEO_H), BG_COLOR)
+        img = Image.new("RGB", (style.video_w, style.video_h), style.bg_color)
 
-    overlay = Image.new("RGBA", (VIDEO_W, VIDEO_H), (0, 0, 0, COVER_OVERLAY_ALPHA))
+    overlay = Image.new("RGBA", (style.video_w, style.video_h), (0, 0, 0, style.cover_overlay_alpha))
     od = ImageDraw.Draw(overlay)
-    od.rectangle([0, 0, VIDEO_W, VIDEO_H], fill=(0, 0, 0, COVER_OVERLAY_ALPHA))
-    od.rectangle([0, VIDEO_H - 620, VIDEO_W, VIDEO_H], fill=(0, 0, 0, 175))
+    od.rectangle([0, 0, style.video_w, style.video_h], fill=(0, 0, 0, style.cover_overlay_alpha))
+    # 标题区横带遮罩，跟随居中偏上的标题位置
+    title_center_y = int(style.video_h * style.cover_title_center_ratio)
+    od.rectangle(
+        [
+            0,
+            title_center_y - style.cover_title_overlay_half_height,
+            style.video_w,
+            title_center_y + style.cover_title_overlay_half_height,
+        ],
+        fill=(0, 0, 0, style.cover_title_overlay_alpha),
+    )
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    brand_font = ImageFont.truetype(DEFAULT_FONT_PATH, COVER_BRAND_FONT_SIZE)
-    title_font = ImageFont.truetype(DEFAULT_FONT_PATH, COVER_TITLE_FONT_SIZE)
+    brand_font = ImageFont.truetype(DEFAULT_FONT_PATH, style.cover_brand_font_size)
+    title_font = ImageFont.truetype(DEFAULT_FONT_PATH, style.cover_title_font_size)
 
-    brand = "知点拆解局"
     draw.text(
-        (72, 96), brand,
-        font=brand_font, fill=(235, 235, 238),
-        stroke_width=2, stroke_fill=STROKE_COLOR,
+        (72, style.cover_brand_y),
+        style.brand,
+        font=brand_font,
+        fill=style.cover_brand_color,
+        stroke_width=2,
+        stroke_fill=style.stroke_color,
     )
 
-    wrapped = _wrap_text(title, 10)
-    line_height = COVER_TITLE_FONT_SIZE + 18
+    wrapped = _wrap_text(title, style.cover_max_chars_per_line)
+    line_height = style.cover_title_font_size + 18
     total_h = len(wrapped) * line_height
-    start_y = VIDEO_H - 465 - total_h // 2
+    start_y = title_center_y - total_h // 2
     for i, text_line in enumerate(wrapped):
         tw = draw.textlength(text_line, font=title_font)
         draw.text(
-            ((VIDEO_W - tw) / 2, start_y + i * line_height),
+            ((style.video_w - tw) / 2, start_y + i * line_height),
             text_line,
             font=title_font,
-            fill=(255, 255, 255),
+            fill=style.cover_title_color,
             stroke_width=5,
-            stroke_fill=STROKE_COLOR,
+            stroke_fill=style.stroke_color,
         )
 
     out = script_dir / "intro.png"

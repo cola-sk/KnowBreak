@@ -48,9 +48,10 @@ def run(scripts_path: Path, cfg: Config) -> Storyboards:
     for script in scripts.scripts:
         narration_blob = "\n".join(f"- {line.text}" for line in script.lines)
         schema = llm.chat_json(
-            _SYSTEM,
+            cfg.profile.prompts.storyboard_system or _SYSTEM,
             f"选题标题：{script.title}\n口播内容（按行）：\n{narration_blob}\n总时长目标：{script.total_duration}s\n",
             _StoryboardSchema,
+            temperature=cfg.profile.generation.storyboard_temperature,
         )
         boards.append(
             Storyboard(
