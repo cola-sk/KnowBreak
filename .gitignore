@@ -34,3 +34,4 @@ inputs/
 .coverage
 htmlcov/
 cookies.txt
+*.tsbuildinfo
