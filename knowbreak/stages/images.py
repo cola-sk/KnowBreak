@@ -191,6 +191,22 @@ def _fetch_with_fallbacks(
     out_path: Path,
     used_source_urls: set[str],
 ) -> dict | None:
+    import hashlib
+    import shutil
+
+    # Initialize cache under out_dir/.cache/images
+    cache_dir = cfg.out_dir / ".cache" / "images"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_index_path = cache_dir / "index.json"
+
+    if cache_index_path.exists():
+        try:
+            cache_index = json.loads(cache_index_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache_index = {}
+    else:
+        cache_index = {}
+
     seen: set[tuple[str, str]] = set()
     for query in [q.strip() for q in queries if q.strip()]:
         for provider in providers:
@@ -198,16 +214,48 @@ def _fetch_with_fallbacks(
             if key in seen:
                 continue
             seen.add(key)
+
+            # Compute cache key based on provider and query
+            cache_key = hashlib.sha256(f"{provider}:{query}".encode("utf-8")).hexdigest()
+            cached_item = cache_index.get(cache_key)
+            cached_file = cache_dir / f"{cache_key}.jpg"
+
+            # Check cache
+            if cached_item and cached_file.exists():
+                source_url = cached_item.get("source_url")
+                # Ensure the image is not already used in this video run
+                if not source_url or source_url not in used_source_urls:
+                    shutil.copy(cached_file, out_path)
+                    if source_url:
+                        used_source_urls.add(source_url)
+                    print(f"    ✓ [Image Cache Hit] {provider} / {query}")
+                    return {"provider": provider, "query": query, **cached_item}
+
+            # Cache miss, fetch normally
             if provider == "pexels" and cfg.pexels_api_key:
                 meta = _fetch_pexels(cfg.pexels_api_key, query, out_path, used_source_urls)
             elif provider == "pixabay" and cfg.pixabay_api_key:
                 meta = _fetch_pixabay(cfg.pixabay_api_key, query, out_path, used_source_urls)
             else:
                 meta = None
+
             if meta:
                 source_url = meta.get("source_url")
                 if source_url:
                     used_source_urls.add(source_url)
+
+                # Copy to cache
+                shutil.copy(out_path, cached_file)
+                # Update index
+                cache_index[cache_key] = meta
+                try:
+                    cache_index_path.write_text(
+                        json.dumps(cache_index, ensure_ascii=False, indent=2),
+                        encoding="utf-8"
+                    )
+                except Exception as e:
+                    print(f"  Warning: failed to save image cache index: {e}")
+
                 return {"provider": provider, "query": query, **meta}
     return None
 

@@ -118,12 +118,15 @@ def _run_capability(
                 "topic_seed 阶段需要主题：在 workflow [capabilities.topic_seed].params.topic 里配置，"
                 "或通过 CLI --topic 传入"
             )
+        td_param = cap.params.get("target_duration")
+        target_duration = int(td_param) if td_param else None
         topic_seed.run(
             pdir,
             cfg,
             topic=t,
             hook=cap.params.get("hook"),
             angle=cap.params.get("angle"),
+            target_duration=target_duration,
             video_id=pdir.parent.name if pdir.parent.exists() else None,
         )
     elif step == "rewrite":

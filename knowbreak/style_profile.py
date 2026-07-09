@@ -86,6 +86,7 @@ class ComposeProfile(BaseModel):
     cover_title_center_ratio: float = 0.45
     progress_bar_ratio: float = 0.59
     progress_bar_width_ratio: float = 0.6
+    progress_bar_enabled: bool = True
     cover_brand_y: int = 200
     top_bar_height: int = 150
     top_gradient_height: int = 70

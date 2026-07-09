@@ -188,20 +188,21 @@ def _render_subtitle_images(
             )
 
         # 进度条
-        progress = (i + 1) / n
-        bar_w = int(style.video_w * style.progress_bar_width_ratio)
-        bar_x = (style.video_w - bar_w) // 2
-        bar_y = int(style.video_h * style.progress_bar_ratio)
-        draw.rounded_rectangle(
-            [bar_x, bar_y, bar_x + bar_w, bar_y + 8],
-            radius=4,
-            fill=style.progress_bg_color,
-        )
-        draw.rounded_rectangle(
-            [bar_x, bar_y, bar_x + int(bar_w * progress), bar_y + 8],
-            radius=4,
-            fill=style.progress_fg_color,
-        )
+        if style.progress_bar_enabled:
+            progress = (i + 1) / n
+            bar_w = int(style.video_w * style.progress_bar_width_ratio)
+            bar_x = (style.video_w - bar_w) // 2
+            bar_y = int(style.video_h * style.progress_bar_ratio)
+            draw.rounded_rectangle(
+                [bar_x, bar_y, bar_x + bar_w, bar_y + 8],
+                radius=4,
+                fill=style.progress_bg_color,
+            )
+            draw.rounded_rectangle(
+                [bar_x, bar_y, bar_x + int(bar_w * progress), bar_y + 8],
+                radius=4,
+                fill=style.progress_fg_color,
+            )
 
         out = script_dir / f"img_{i:03d}.png"
         img.save(out, "PNG")

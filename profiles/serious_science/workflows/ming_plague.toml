@@ -11,7 +11,7 @@ steps = [
 ]
 
 [capabilities.topic_seed]
-params = { topic = "鼠疫是如何影响明朝历史进程的", hook = "崇祯六年的北京城，不是被攻破的，是被鼠疫掏空的。", angle = "从北京城人口与城防崩溃切入，串起鼠疫与明朝灭亡的因果链" }
+params = { topic = "鼠疫是如何影响明朝历史进程的", hook = "崇祯六年的北京城，不是被攻破的，是被鼠疫掏空的。", angle = "从北京城人口与城防崩溃切入，串起鼠疫与明朝灭亡的因果链", target_duration = "120" }
 inputs = []
 outputs = ["topics.json"]
 

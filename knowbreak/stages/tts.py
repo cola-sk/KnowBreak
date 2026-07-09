@@ -25,12 +25,68 @@ from ._common import save_json
 SUPPORTED_PROVIDERS = {"edge", "openai", "volcengine", "minimax"}
 
 
+def _get_tts_config_dict(cfg: Config, provider: str) -> dict:
+    d = {"provider": provider}
+    if provider == "edge":
+        d.update({
+            "voice": cfg.tts.voice,
+            "rate": cfg.tts.rate,
+            "volume": cfg.tts.volume,
+        })
+    elif provider == "openai":
+        d.update({
+            "model": cfg.tts.openai_model,
+            "voice": cfg.tts.openai_voice,
+            "speed": cfg.tts.speed,
+        })
+    elif provider == "volcengine":
+        d.update({
+            "model": cfg.tts.volc_model,
+            "speaker": cfg.tts.volc_speaker,
+            "context": cfg.tts.volc_context,
+            "sample_rate": cfg.tts.volc_sample_rate,
+            "speech_rate": cfg.tts.volc_speech_rate,
+            "loudness_rate": cfg.tts.volc_loudness_rate,
+            "pitch_rate": cfg.tts.volc_pitch_rate,
+        })
+    elif provider == "minimax":
+        d.update({
+            "model": cfg.tts.minimax_model,
+            "voice_id": cfg.tts.minimax_voice_id,
+            "speed": cfg.tts.speed,
+        })
+    return d
+
+
+def _get_hash(text: str, config_dict: dict) -> str:
+    import hashlib
+    data = {
+        "text": text,
+        "config": config_dict
+    }
+    dumped = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(dumped.encode("utf-8")).hexdigest()
+
+
 def run(scripts_path: Path, cfg: Config) -> TTSResult:
+    import shutil
     scripts: Scripts = Scripts.model_validate_json(scripts_path.read_text(encoding="utf-8"))
     pdir = scripts_path.resolve().parent
     tts_dir = pdir / "tts"
     tts_dir.mkdir(exist_ok=True)
     provider = _normalize_provider(cfg.tts.provider)
+
+    # Initialize cache under out_dir/.cache/tts
+    cache_dir = cfg.out_dir / ".cache" / "tts"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_index_path = cache_dir / "index.json"
+    if cache_index_path.exists():
+        try:
+            cache_index = json.loads(cache_index_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache_index = {}
+    else:
+        cache_index = {}
 
     result_scripts: list[TTSScript] = []
     for script in scripts.scripts:
@@ -40,8 +96,40 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
         line_audios: list[TTSLine] = []
         for i, line in enumerate(script.lines):
             mp3 = script_dir / f"line_{i:03d}.mp3"
-            provider = _synth(line.text, mp3, cfg, provider)
-            dur = _probe_duration(mp3)
+            
+            # Compute cache key based on text and provider config
+            prov_config = _get_tts_config_dict(cfg, provider)
+            cache_key = _get_hash(line.text, prov_config)
+            
+            cached_item = cache_index.get(cache_key)
+            cached_file = cache_dir / f"{cache_key}.mp3"
+            
+            if cached_item and cached_file.exists():
+                shutil.copy(cached_file, mp3)
+                actual_provider = cached_item["actual_provider"]
+                dur = cached_item["duration"]
+                print(f"  ✓ [TTS Cache Hit] topic {script.topic_index} line {i}: {actual_provider} (duration: {dur}s)")
+            else:
+                actual_provider = _synth(line.text, mp3, cfg, provider)
+                dur = _probe_duration(mp3)
+                
+                # Copy to cache
+                shutil.copy(mp3, cached_file)
+                # Update index
+                cache_index[cache_key] = {
+                    "text": line.text,
+                    "requested_provider": provider,
+                    "actual_provider": actual_provider,
+                    "duration": dur,
+                }
+                try:
+                    cache_index_path.write_text(
+                        json.dumps(cache_index, ensure_ascii=False, indent=2),
+                        encoding="utf-8"
+                    )
+                except Exception as e:
+                    print(f"  Warning: failed to save tts cache index: {e}")
+
             line_audios.append(TTSLine(
                 index=i,
                 text=line.text,

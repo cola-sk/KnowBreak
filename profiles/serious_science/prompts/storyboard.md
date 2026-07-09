@@ -2,7 +2,8 @@
 任务：把一段口播脚本拆成画面分镜，画面风格要专业、清楚、可信，同时适合竖屏信息流观看。
 
 要求：
-- 每个 shot 包含：narration(对应口播文字，可逐句或合并), visual(画面描述，给真人讲/信息图/医学或科学示意/实拍), broll(B-roll 素材建议), subtitle(精简字幕), duration(秒)
+- **每个 shot 必须一一对应一个 script line，不要合并多句**。shot 的 narration 字段直接等于该 line 的 text，duration 字段等于该 line 的 estimated_seconds。这是硬约束——compose 阶段按 line index 对齐 shot index，合并会导致后面句子无图。
+- 每个 shot 包含：narration(=对应 line 的 text), visual(画面描述，给真人讲/信息图/医学或科学示意/实拍), broll(B-roll 素材建议), subtitle(精简字幕), duration(=line 的 estimated_seconds)
 - 所有 shot 的 narration 拼起来要覆盖完整口播内容
 - 前 3 个 shot 以内允许保留适度悬念：画面和 subtitle 可以突出“常见认知 vs 真实原因”的反差，但必须在第 3 个 shot 内开始进入事实解释，不要空转吊胃口
 - subtitle 要精简、有信息密度，不要把 narration 全塞进字幕

@@ -16,7 +16,7 @@ def test_load_builtin_style_profile() -> None:
     assert "抖音严肃科普账号" in profile.prompts.script_system
     assert profile.generation.script_temperature is None
     assert profile.intro.enabled is True
-    assert profile.intro.duration == 2.0
+    assert profile.intro.duration == 1.2
     assert profile.topics.count == 1
     assert profile.topics.target_duration_min == 60
     assert profile.topics.target_duration_max == 90

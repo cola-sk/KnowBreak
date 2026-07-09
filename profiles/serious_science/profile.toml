@@ -13,7 +13,7 @@ images_system = "prompts/images.md"
 
 [intro]
 enabled = true
-duration = 2.0
+duration = 1.2
 
 [topics]
 count = 1
@@ -51,6 +51,7 @@ subtitle_center_ratio = 0.45
 cover_title_center_ratio = 0.45
 progress_bar_ratio = 0.59
 progress_bar_width_ratio = 0.6
+progress_bar_enabled = false
 cover_brand_y = 200
 top_bar_height = 150
 top_gradient_height = 70

@@ -32,6 +32,7 @@ def run(
     topic: str | None,
     hook: str | None = None,
     angle: str | None = None,
+    target_duration: int | None = None,
     video_id: str | None = None,
 ) -> Topics:
     if not topic:
@@ -55,6 +56,9 @@ def run(
             temperature=cfg.profile.generation.script_temperature,
         )
 
+    # target_duration 优先级：workflow params > profile.topics.target_duration_min
+    resolved_duration = target_duration or cfg.profile.topics.target_duration_min
+
     topics = Topics(
         video_id=video_id or pdir.name,
         topics=[
@@ -64,7 +68,7 @@ def run(
                 hook=seed.hook,
                 angle=seed.angle,
                 knowledge_refs=[],
-                target_duration=cfg.profile.topics.target_duration_min,
+                target_duration=resolved_duration,
             )
         ],
     )
