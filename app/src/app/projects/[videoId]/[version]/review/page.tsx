@@ -14,9 +14,18 @@ export default async function ProductionReviewPage({ params }: Props) {
   const { videoId, version } = await params;
   try {
     const initial = (await getProductionReviewData(videoId, version)) as ProductionReviewPayload;
+    const reviewStatuses = Object.fromEntries(
+      Object.entries(initial.reviews).map(([stage, review]) => [stage, review?.status]),
+    );
     return (
       <main className="shell">
-        <StageHeader videoId={videoId} version={version} title={initial.title} active="review" />
+        <StageHeader
+          videoId={videoId}
+          version={version}
+          title={initial.title}
+          active="review"
+          reviewStatuses={reviewStatuses}
+        />
         <ProductionReviewClient initial={initial} />
       </main>
     );

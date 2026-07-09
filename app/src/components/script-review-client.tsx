@@ -150,9 +150,13 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
         <button className="secondary" disabled={saving} onClick={save}>
           保存脚本
         </button>
-        <button className="warn" disabled={saving} onClick={approve}>
-          通过脚本审核
-        </button>
+        {data.review.status === "approved" ? (
+          <span className="approved-pill">已通过</span>
+        ) : (
+          <button className="approve-btn" disabled={saving} onClick={approve}>
+            通过脚本审核
+          </button>
+        )}
       </div>
 
       {message ? <div style={{ marginTop: 10, color: "var(--muted)" }}>{message}</div> : null}

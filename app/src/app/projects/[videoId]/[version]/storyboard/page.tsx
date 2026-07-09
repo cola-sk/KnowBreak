@@ -4,7 +4,7 @@ import {
   StoryboardReviewClient,
   type StoryboardReviewPayload,
 } from "@/components/storyboard-review-client";
-import { getStageData } from "@/lib/review-store";
+import { getReviewStatuses, getStageData } from "@/lib/review-store";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
@@ -19,9 +19,19 @@ export default async function StoryboardReviewPage({ params }: Props) {
       "storyboard",
     )) as StoryboardReviewPayload;
     const title = initial.artifact.storyboards[0]?.title;
+    const reviewStatuses = {
+      ...(await getReviewStatuses(videoId, version)),
+      storyboard_review: initial.review.status,
+    };
     return (
       <main className="shell">
-        <StageHeader videoId={videoId} version={version} title={title} active="storyboard" />
+        <StageHeader
+          videoId={videoId}
+          version={version}
+          title={title}
+          active="storyboard"
+          reviewStatuses={reviewStatuses}
+        />
         <StoryboardReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );

@@ -266,6 +266,20 @@ export async function ensureReviewFile(
   return normalized;
 }
 
+export async function getReviewStatuses(
+  videoId: string,
+  version: string,
+): Promise<Partial<Record<ReviewStage, ReviewStatus>>> {
+  const statuses: Partial<Record<ReviewStage, ReviewStatus>> = {};
+  for (const reviewStage of REVIEW_STAGE_ORDER) {
+    const review = await readJsonFile<ReviewFile>(reviewPath(videoId, version, reviewStage));
+    if (review?.status) {
+      statuses[reviewStage] = review.status;
+    }
+  }
+  return statuses;
+}
+
 export async function getStageData(videoId: string, version: string, stage: ArtifactStage): Promise<{ artifact: unknown; review: ReviewFile }> {
   const artifactFilePath = artifactPath(videoId, version, stage);
   const artifact = await readJsonFile<unknown>(artifactFilePath);
@@ -286,6 +300,7 @@ interface ComposeVideo {
 
 interface WorkflowPlan {
   workflow?: string;
+  profile?: string;
   steps?: Array<{
     capability?: string;
     params?: Record<string, string>;
@@ -329,6 +344,75 @@ async function readArtifact(videoId: string, version: string, stage: ArtifactSta
 
 async function readWorkflowPlan(versionDir: string): Promise<WorkflowPlan | null> {
   return readJsonFile<WorkflowPlan>(path.join(versionDir, "workflow_plan.json"));
+}
+
+function resolveProjectRoot(): string {
+  const candidates = [
+    process.env.KB_PROJECT_ROOT,
+    process.cwd(),
+    path.resolve(process.cwd(), ".."),
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, "pyproject.toml"))) {
+      return candidate;
+    }
+  }
+  return path.resolve(process.cwd(), "..");
+}
+
+async function listTomlFiles(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  let entries: Array<import("node:fs").Dirent> = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listTomlFiles(entryPath)));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".toml")) {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+function readWorkflowId(toml: string): string | null {
+  const match = /^id\s*=\s*"([^"]+)"/m.exec(toml);
+  return match?.[1] ?? null;
+}
+
+export async function resolveWorkflowCliName(
+  workflowName: string,
+  profileName = "serious_science",
+): Promise<string> {
+  const trimmed = workflowName.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const workflowsDir = path.join(resolveProjectRoot(), "profiles", profileName, "workflows");
+  const directPath = path.join(workflowsDir, `${trimmed}.toml`);
+  if (existsSync(directPath)) {
+    return trimmed;
+  }
+
+  const files = await listTomlFiles(workflowsDir);
+  for (const file of files) {
+    const text = await fs.readFile(file, "utf-8");
+    if (readWorkflowId(text) !== trimmed) {
+      continue;
+    }
+    return path.relative(workflowsDir, file).replace(/\.toml$/, "").split(path.sep).join("/");
+  }
+
+  return trimmed;
 }
 
 function firstNonEmpty(values: Array<string | null | undefined>): string | null {
@@ -449,7 +533,10 @@ export async function getProductionReviewData(
     title: await inferVersionTitle(versionDir),
     versionDir,
     source: await inferRegenerationSource(versionDir),
-    workflow: workflowPlan?.workflow ?? "serious_science_one",
+    workflow: await resolveWorkflowCliName(
+      workflowPlan?.workflow ?? "serious_science_one",
+      workflowPlan?.profile ?? "serious_science",
+    ),
     workflowSteps: workflowPlan?.steps?.map((step) => step.capability).filter(Boolean) as string[] ?? [],
     videos: Array.isArray(compose.videos) ? compose.videos : [],
     artifacts: {

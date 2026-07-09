@@ -12,6 +12,7 @@ import {
   getVersionDir,
   resolveOutDir,
   resolveReviewRelativePath,
+  resolveWorkflowCliName,
   writeRegenerationJob,
 } from "@/lib/review-store";
 
@@ -67,6 +68,14 @@ function validateVersion(version: string): string {
   return version;
 }
 
+function validateWorkflowName(workflow: string): string {
+  const segments = workflow.split("/");
+  if (segments.length === 0 || segments.some((segment) => !SAFE_SEGMENT_RE.test(segment))) {
+    throw new Error("workflow 名称非法");
+  }
+  return workflow;
+}
+
 async function nextVersion(videoId: string): Promise<string> {
   const baseDir = path.join(resolveOutDir(), validateVersion(videoId));
   let max = 0;
@@ -105,6 +114,85 @@ async function persistJobCopies(
   await Promise.all(versions.map((version) => writeRegenerationJob(videoId, version, job)));
 }
 
+async function listJsonFiles(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  let entries: Array<import("node:fs").Dirent> = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listJsonFiles(entryPath)));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".json")) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
+function rebasePathStrings(value: unknown, oldPrefix: string, newPrefix: string): { value: unknown; changed: boolean } {
+  if (typeof value === "string") {
+    if (value.startsWith(oldPrefix)) {
+      return { value: `${newPrefix}${value.slice(oldPrefix.length)}`, changed: true };
+    }
+    return { value, changed: false };
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map((item) => {
+      const rebased = rebasePathStrings(item, oldPrefix, newPrefix);
+      changed = changed || rebased.changed;
+      return rebased.value;
+    });
+    return { value: items, changed };
+  }
+
+  if (value && typeof value === "object") {
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      const rebased = rebasePathStrings(item, oldPrefix, newPrefix);
+      changed = changed || rebased.changed;
+      next[key] = rebased.value;
+    }
+    return { value: next, changed };
+  }
+
+  return { value, changed: false };
+}
+
+async function rebaseCopiedVersionJsonPaths(
+  videoId: string,
+  currentVersion: string,
+  targetVersion: string,
+  targetDir: string,
+): Promise<void> {
+  const oldPrefix = currentVersion === "legacy" ? `${videoId}/` : `${videoId}/${currentVersion}/`;
+  const newPrefix = `${videoId}/${targetVersion}/`;
+
+  for (const file of await listJsonFiles(targetDir)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await fs.readFile(file, "utf-8"));
+    } catch {
+      continue;
+    }
+    const rebased = rebasePathStrings(parsed, oldPrefix, newPrefix);
+    if (!rebased.changed) {
+      continue;
+    }
+    await fs.writeFile(file, JSON.stringify(rebased.value, null, 2), "utf-8");
+  }
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ videoId: string; version: string }> },
@@ -119,14 +207,14 @@ export async function POST(
     const startFrom = normalizeStartFrom(body.startFrom);
     const currentData = await getProductionReviewData(videoId, currentVersion);
     const source = (body.source?.trim() || currentData.source).trim();
-    const workflow = (body.workflow?.trim() || currentData.workflow || "serious_science_one").trim();
+    const workflow = await resolveWorkflowCliName(
+      (body.workflow?.trim() || currentData.workflow || "serious_science_one").trim(),
+    );
 
     if (!source) {
       throw new Error("source 不能为空");
     }
-    if (!workflow || !SAFE_SEGMENT_RE.test(workflow)) {
-      throw new Error("workflow 名称非法");
-    }
+    validateWorkflowName(workflow);
 
     let commandMode: VersionMode = mode;
     let commandVersion = currentVersion;
@@ -139,6 +227,9 @@ export async function POST(
       } else if (startFrom) {
         targetVersion = await nextVersion(videoId);
       }
+      if (targetVersion === videoId) {
+        throw new Error("新版本号不能与 video_id 相同；请使用 v001、v002 或 draft-a 这类名称");
+      }
 
       if (startFrom) {
         if (!targetVersion) {
@@ -149,6 +240,7 @@ export async function POST(
           throw new Error(`目标版本已存在: ${targetVersion}`);
         }
         await fs.cp(getVersionDir(videoId, currentVersion), targetDir, { recursive: true });
+        await rebaseCopiedVersionJsonPaths(videoId, currentVersion, targetVersion, targetDir);
         commandMode = "update";
         commandVersion = targetVersion;
         jobVersion = targetVersion;

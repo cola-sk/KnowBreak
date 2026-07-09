@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RegenerationJob, ReviewFile, ReviewStage } from "@/lib/types";
 
@@ -94,6 +94,28 @@ interface Props {
   initial: ProductionReviewPayload;
 }
 
+interface CropEditorState {
+  itemId: string;
+  title: string;
+  objectUrl: string;
+  fileName: string;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface Size {
+  width: number;
+  height: number;
+}
+
+const VIEWPORT_SIZE: Size = {
+  width: 360,
+  height: 640,
+};
+
 const STAGE_LABELS: Record<string, string> = {
   start: "从头开始",
   asr: "ASR/字幕",
@@ -151,14 +173,36 @@ function uniqueStageOptions(steps: string[]): string[] {
   return ["start", ...preferred.filter((step) => fromWorkflow.includes(step))];
 }
 
+function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/");
+}
+
+function minCoverScale(size: Size): number {
+  return Math.max(VIEWPORT_SIZE.width / size.width, VIEWPORT_SIZE.height / size.height);
+}
+
+function clampOffset(offset: Point, size: Size, scale: number): Point {
+  const displayWidth = size.width * scale;
+  const displayHeight = size.height * scale;
+  const maxX = Math.max(0, (displayWidth - VIEWPORT_SIZE.width) / 2);
+  const maxY = Math.max(0, (displayHeight - VIEWPORT_SIZE.height) / 2);
+
+  return {
+    x: Math.max(-maxX, Math.min(maxX, offset.x)),
+    y: Math.max(-maxY, Math.min(maxY, offset.y)),
+  };
+}
+
 export function ProductionReviewClient({ initial }: Props) {
   const [data, setData] = useState<ProductionReviewPayload>(initial);
   const [topicIndex, setTopicIndex] = useState<number>(initial.videos[0]?.topic_index ?? 0);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
+  const [editor, setEditor] = useState<CropEditorState | null>(null);
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<"create" | "update">("update");
-  const [startFrom, setStartFrom] = useState("compose");
+  const [startFrom, setStartFrom] = useState("tts");
   const [targetVersion, setTargetVersion] = useState("");
   const [source, setSource] = useState(initial.source);
   const [workflow, setWorkflow] = useState(initial.workflow);
@@ -181,6 +225,79 @@ export function ProductionReviewClient({ initial }: Props) {
 
   const stageOptions = useMemo(() => uniqueStageOptions(data.workflowSteps), [data.workflowSteps]);
   const imageToken = data.reviews.image_review?.updated_at ?? data.job?.finishedAt ?? data.version;
+
+  const closeEditor = () => {
+    setEditor((prev) => {
+      if (prev?.objectUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(prev.objectUrl);
+      }
+      return null;
+    });
+  };
+
+  const openEditorForFile = (itemId: string, title: string, file: File) => {
+    if (!isImageFile(file)) {
+      setMessage("只支持图片文件。请上传 jpg/png/webp 等格式。");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setEditor((prev) => {
+      if (prev?.objectUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(prev.objectUrl);
+      }
+      return {
+        itemId,
+        title,
+        objectUrl,
+        fileName: file.name || "pasted-image.jpg",
+      };
+    });
+    setMessage("");
+  };
+
+  const replaceEditorSource = (file: File) => {
+    if (!editor) {
+      return;
+    }
+    openEditorForFile(editor.itemId, editor.title, file);
+  };
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+
+    const onPaste = (event: ClipboardEvent) => {
+      const items = event.clipboardData?.items;
+      if (!items) {
+        return;
+      }
+      for (const item of items) {
+        if (!item.type.startsWith("image/")) {
+          continue;
+        }
+        const file = item.getAsFile();
+        if (!file) {
+          continue;
+        }
+        event.preventDefault();
+        replaceEditorSource(file);
+        return;
+      }
+    };
+
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [editor]);
+
+  useEffect(() => {
+    return () => {
+      if (editor?.objectUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(editor.objectUrl);
+      }
+    };
+  }, [editor]);
 
   const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
     setData((prev) => {
@@ -270,57 +387,65 @@ export function ProductionReviewClient({ initial }: Props) {
     });
   };
 
+  const persistEdits = async (): Promise<{
+    artifacts: ProductionReviewPayload["artifacts"];
+    reviews: ProductionReviewPayload["reviews"];
+  }> => {
+    const nextReviews: Partial<Record<ReviewStage, ReviewFile>> = { ...data.reviews };
+    const nextArtifacts = { ...data.artifacts };
+
+    if (data.artifacts.script) {
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/script`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artifact: data.artifacts.script, review: { status: "in_review" } }),
+      });
+      const payload = (await response.json()) as { artifact?: ScriptArtifact; review?: ReviewFile; error?: string };
+      if (!response.ok || !payload.artifact || !payload.review) {
+        throw new Error(payload.error ?? "脚本保存失败");
+      }
+      nextArtifacts.script = payload.artifact;
+      nextReviews.script_review = payload.review;
+    }
+
+    if (data.artifacts.storyboard) {
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/storyboard`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artifact: data.artifacts.storyboard, review: { status: "in_review" } }),
+      });
+      const payload = (await response.json()) as { artifact?: StoryboardArtifact; review?: ReviewFile; error?: string };
+      if (!response.ok || !payload.artifact || !payload.review) {
+        throw new Error(payload.error ?? "分镜保存失败");
+      }
+      nextArtifacts.storyboard = payload.artifact;
+      nextReviews.storyboard_review = payload.review;
+    }
+
+    if (data.artifacts.images) {
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artifact: data.artifacts.images, review: { status: "in_review" } }),
+      });
+      const payload = (await response.json()) as { artifact?: TopicImages[]; review?: ReviewFile; error?: string };
+      if (!response.ok || !payload.artifact || !payload.review) {
+        throw new Error(payload.error ?? "图片信息保存失败");
+      }
+      nextArtifacts.images = payload.artifact;
+      nextReviews.image_review = payload.review;
+    }
+
+    setData((prev) => ({ ...prev, artifacts: nextArtifacts, reviews: nextReviews }));
+    return { artifacts: nextArtifacts, reviews: nextReviews };
+  };
+
   const saveAll = async () => {
     setSaving(true);
     setMessage("");
     try {
-      const nextReviews: Partial<Record<ReviewStage, ReviewFile>> = { ...data.reviews };
-      const nextArtifacts = { ...data.artifacts };
-
-      if (data.artifacts.script) {
-        const response = await fetch(`/api/projects/${data.videoId}/${data.version}/script`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ artifact: data.artifacts.script, review: { status: "in_review" } }),
-        });
-        const payload = (await response.json()) as { artifact?: ScriptArtifact; review?: ReviewFile; error?: string };
-        if (!response.ok || !payload.artifact || !payload.review) {
-          throw new Error(payload.error ?? "脚本保存失败");
-        }
-        nextArtifacts.script = payload.artifact;
-        nextReviews.script_review = payload.review;
-      }
-
-      if (data.artifacts.storyboard) {
-        const response = await fetch(`/api/projects/${data.videoId}/${data.version}/storyboard`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ artifact: data.artifacts.storyboard, review: { status: "in_review" } }),
-        });
-        const payload = (await response.json()) as { artifact?: StoryboardArtifact; review?: ReviewFile; error?: string };
-        if (!response.ok || !payload.artifact || !payload.review) {
-          throw new Error(payload.error ?? "分镜保存失败");
-        }
-        nextArtifacts.storyboard = payload.artifact;
-        nextReviews.storyboard_review = payload.review;
-      }
-
-      if (data.artifacts.images) {
-        const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ artifact: data.artifacts.images, review: { status: "in_review" } }),
-        });
-        const payload = (await response.json()) as { artifact?: TopicImages[]; review?: ReviewFile; error?: string };
-        if (!response.ok || !payload.artifact || !payload.review) {
-          throw new Error(payload.error ?? "图片信息保存失败");
-        }
-        nextArtifacts.images = payload.artifact;
-        nextReviews.image_review = payload.review;
-      }
-
-      setData((prev) => ({ ...prev, artifacts: nextArtifacts, reviews: nextReviews }));
-      setMessage("已保存脚本、分镜和图片信息。需要更新 MP4 时请选择阶段并点击重生成。");
+      await persistEdits();
+      setMessage("已保存文案、分镜和图片信息。需要更新 MP4 时请选择阶段并点击重生成。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
     } finally {
@@ -328,10 +453,56 @@ export function ProductionReviewClient({ initial }: Props) {
     }
   };
 
-  const regenerate = async () => {
-    setRegenerating(true);
+  const uploadCroppedImage = async (blob: Blob) => {
+    if (!editor) {
+      return;
+    }
+
+    setSaving(true);
+    setReplacingItemId(editor.itemId);
     setMessage("");
     try {
+      const form = new FormData();
+      form.append("itemId", editor.itemId);
+      form.append("file", blob, "replacement.jpg");
+
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images/replace`, {
+        method: "POST",
+        body: form,
+      });
+      const payload = (await response.json()) as
+        | { artifact?: TopicImages[]; review?: ReviewFile; imagePath?: string; error?: string }
+        | { error: string };
+
+      if (!response.ok || !("artifact" in payload) || !payload.artifact || !payload.review) {
+        throw new Error("error" in payload ? payload.error : "图片替换失败");
+      }
+
+      setData((prev) => ({
+        ...prev,
+        artifacts: { ...prev.artifacts, images: payload.artifact as TopicImages[] },
+        reviews: { ...prev.reviews, image_review: payload.review as ReviewFile },
+      }));
+      setMessage(`图片已裁剪、替换并保存：${payload.imagePath ?? editor.itemId}`);
+      closeEditor();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片替换失败");
+    } finally {
+      setSaving(false);
+      setReplacingItemId(null);
+    }
+  };
+
+  const regenerate = async (saveBeforeRun: boolean) => {
+    setRegenerating(true);
+    if (saveBeforeRun) {
+      setSaving(true);
+    }
+    setMessage("");
+    try {
+      if (saveBeforeRun) {
+        await persistEdits();
+      }
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/regenerate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -348,10 +519,13 @@ export function ProductionReviewClient({ initial }: Props) {
         throw new Error(payload.error ?? "启动重生成失败");
       }
       setData((prev) => ({ ...prev, job: payload.job! }));
-      setMessage("重生成任务已启动。日志会写入版本 reviews 目录；任务完成后刷新页面查看新视频。");
+      setMessage(saveBeforeRun
+        ? "已保存修改，并启动重生成任务。日志会写入版本 reviews 目录；任务完成后刷新页面查看新视频。"
+        : "重生成任务已启动。日志会写入版本 reviews 目录；任务完成后刷新页面查看新视频。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "启动重生成失败");
     } finally {
+      setSaving(false);
       setRegenerating(false);
     }
   };
@@ -411,7 +585,7 @@ export function ProductionReviewClient({ initial }: Props) {
         <section className="panel" style={{ padding: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 18 }}>保存与重生成</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
-            保存只改 JSON/图片元数据；重生成会调用 CLI 更新音频、图片或 MP4。
+            修改文案、分镜和图片后，可以先保存，也可以保存后直接从指定阶段重生成。
           </div>
 
           <div className="row" style={{ marginTop: 12 }}>
@@ -424,8 +598,8 @@ export function ProductionReviewClient({ initial }: Props) {
             <div>
               <label style={{ fontSize: 12, color: "var(--muted)" }}>模式</label>
               <select value={mode} onChange={(event) => setMode(event.target.value as "create" | "update")}>
-                <option value="update">update：覆盖当前版本</option>
-                <option value="create">create：生成新版本</option>
+                <option value="update">覆盖当前版本</option>
+                <option value="create">新生成一个 version</option>
               </select>
             </div>
             <div>
@@ -452,9 +626,14 @@ export function ProductionReviewClient({ initial }: Props) {
                 <input value={targetVersion} onChange={(event) => setTargetVersion(event.target.value)} />
               </div>
             ) : null}
-            <button className="warn" disabled={saving || regenerating} onClick={regenerate}>
-              {regenerating ? "启动中..." : "重生成视频"}
-            </button>
+            <div className="row">
+              <button className="warn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
+                {saving || regenerating ? "处理中..." : "保存并重生成"}
+              </button>
+              <button className="secondary" disabled={saving || regenerating} onClick={() => regenerate(false)}>
+                仅重生成
+              </button>
+            </div>
           </div>
 
           {data.job ? (
@@ -487,138 +666,197 @@ export function ProductionReviewClient({ initial }: Props) {
         <div style={{ fontWeight: 700, fontSize: 18 }}>
           #{topicIndex} {selectedScript?.title ?? selectedStoryboard?.title ?? selectedImages?.title ?? "未命名"}
         </div>
-        <div className="review-columns" style={{ marginTop: 12 }}>
-          <ScriptEditor script={selectedScript} onChange={updateScriptLine} />
-          <StoryboardEditor board={selectedStoryboard} images={selectedImages} imageToken={imageToken} onChange={updateShot} />
-          <ImagesEditor topic={selectedImages} imageToken={imageToken} onChange={updateImage} />
-        </div>
+        <GroupedTopicEditor
+          script={selectedScript}
+          board={selectedStoryboard}
+          images={selectedImages}
+          imageToken={imageToken}
+          replacingItemId={replacingItemId}
+          onScriptChange={updateScriptLine}
+          onShotChange={updateShot}
+          onImageChange={updateImage}
+          onImageReplace={openEditorForFile}
+        />
       </section>
+
+      {editor ? (
+        <ImageCropModal
+          editor={editor}
+          busy={saving}
+          onClose={closeEditor}
+          onSave={uploadCroppedImage}
+          onPickAnother={replaceEditorSource}
+        />
+      ) : null}
     </div>
   );
 }
 
-function ScriptEditor({
+function GroupedTopicEditor({
   script,
-  onChange,
-}: {
-  script: ScriptItem | null;
-  onChange: (lineIndex: number, key: keyof ScriptLine, value: string) => void;
-}) {
-  if (!script) {
-    return <div className="sub-panel">未找到脚本。</div>;
-  }
-  return (
-    <div className="sub-panel">
-      <div style={{ fontWeight: 700 }}>脚本</div>
-      <div style={{ color: "var(--muted)", fontSize: 12 }}>lines: {script.lines.length}</div>
-      <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-        {script.lines.map((line, idx) => (
-          <div key={idx} style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 10 }}>
-            <div className="row" style={{ alignItems: "center", marginBottom: 6 }}>
-              <span className="badge">line {idx + 1}</span>
-              <input
-                type="number"
-                step="0.1"
-                value={line.estimated_seconds}
-                onChange={(event) => onChange(idx, "estimated_seconds", event.target.value)}
-                style={{ maxWidth: 120 }}
-              />
-            </div>
-            <textarea value={line.text} onChange={(event) => onChange(idx, "text", event.target.value)} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StoryboardEditor({
   board,
   images,
   imageToken,
-  onChange,
+  replacingItemId,
+  onScriptChange,
+  onShotChange,
+  onImageChange,
+  onImageReplace,
 }: {
+  script: ScriptItem | null;
   board: StoryboardItem | null;
   images: TopicImages | null;
   imageToken: string;
-  onChange: (shotIndex: number, key: keyof Shot, value: string) => void;
+  replacingItemId: string | null;
+  onScriptChange: (lineIndex: number, key: keyof ScriptLine, value: string) => void;
+  onShotChange: (shotIndex: number, key: keyof Shot, value: string) => void;
+  onImageChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
+  onImageReplace: (itemId: string, title: string, file: File) => void;
 }) {
-  if (!board) {
-    return <div className="sub-panel">未找到分镜。</div>;
-  }
-  return (
-    <div className="sub-panel">
-      <div style={{ fontWeight: 700 }}>分镜 + 对应图片</div>
-      <div style={{ color: "var(--muted)", fontSize: 12 }}>shots: {board.shots.length}</div>
-      <div style={{ display: "grid", gap: 12, marginTop: 10 }}>
-        {board.shots.map((shot, idx) => {
-          const image = images?.shots.find((item) => item.shot_index === shot.index) ?? images?.shots[idx];
-          return (
-            <div key={`${shot.index}-${idx}`} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 10 }}>
-              <div className="row" style={{ alignItems: "center" }}>
-                <span className="badge">shot {shot.index}</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={shot.duration}
-                  onChange={(event) => onChange(idx, "duration", event.target.value)}
-                  style={{ maxWidth: 110 }}
-                />
-              </div>
-              {image ? (
-                <img
-                  src={assetUrl(image.image_path, imageToken)}
-                  alt={`shot ${shot.index}`}
-                  style={{ width: "100%", aspectRatio: "9 / 16", objectFit: "cover", borderRadius: 10, marginTop: 8 }}
-                />
-              ) : null}
-              <FieldTextarea label="旁白" value={shot.narration} onChange={(value) => onChange(idx, "narration", value)} />
-              <FieldTextarea label="画面" value={shot.visual} onChange={(value) => onChange(idx, "visual", value)} />
-              <FieldTextarea label="B-roll" value={shot.broll} onChange={(value) => onChange(idx, "broll", value)} />
-              <FieldTextarea label="字幕" value={shot.subtitle} onChange={(value) => onChange(idx, "subtitle", value)} />
-            </div>
-          );
-        })}
-      </div>
-    </div>
+  const shotCount = Math.max(
+    script?.lines.length ?? 0,
+    board?.shots.length ?? 0,
+    images?.shots.length ?? 0,
   );
-}
 
-function ImagesEditor({
-  topic,
-  imageToken,
-  onChange,
-}: {
-  topic: TopicImages | null;
-  imageToken: string;
-  onChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
-}) {
-  if (!topic) {
-    return <div className="sub-panel">未找到图片信息。</div>;
+  if (shotCount === 0 && !images?.cover) {
+    return <div className="sub-panel" style={{ marginTop: 12 }}>未找到可审核的分镜信息。</div>;
   }
+
   return (
-    <div className="sub-panel">
-      <div style={{ fontWeight: 700 }}>图片信息</div>
-      <div style={{ color: "var(--muted)", fontSize: 12 }}>images: {(topic.cover ? 1 : 0) + topic.shots.length}</div>
-      <div style={{ display: "grid", gap: 12, marginTop: 10 }}>
-        {topic.cover ? (
-          <ImageMetaEditor
-            title="cover"
-            image={topic.cover}
-            imageToken={imageToken}
-            onChange={(key, value) => onChange("cover", undefined, key, value)}
-          />
-        ) : null}
-        {topic.shots.map((shot) => (
-          <ImageMetaEditor
-            key={shot.shot_index}
-            title={`shot ${shot.shot_index}`}
-            image={shot}
-            imageToken={imageToken}
-            onChange={(key, value) => onChange("shot", shot.shot_index, key, value)}
-          />
-        ))}
-      </div>
+    <div className="shot-review-stack">
+      {images?.cover ? (
+        <div className="shot-card cover-card">
+          <div className="cover-summary">
+            <div className="shot-card-title">封面</div>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>不属于具体分镜，用于片头/封面图。</div>
+            <img
+              src={assetUrl(images.cover.image_path, imageToken)}
+              alt="封面图片"
+              className="cover-preview"
+            />
+          </div>
+          <div className="field-group">
+            <div className="field-group-title">封面图片信息</div>
+            <ImageMetaEditor
+              title="cover"
+              image={images.cover}
+              imageToken={imageToken}
+              compact
+              onChange={(key, value) => onImageChange("cover", undefined, key, value)}
+              onReplace={(file) => onImageReplace(`topic_${images.topic_index}_cover`, "封面图片", file)}
+              replacing={replacingItemId === `topic_${images.topic_index}_cover`}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {Array.from({ length: shotCount }, (_, idx) => {
+        const line = script?.lines[idx] ?? null;
+        const shot = board?.shots[idx] ?? null;
+        const image = shot
+          ? images?.shots.find((item) => item.shot_index === shot.index) ?? images?.shots[idx] ?? null
+          : images?.shots[idx] ?? null;
+        const displayIndex = shot?.index ?? image?.shot_index ?? idx;
+        const imageItemId = images && image
+          ? `topic_${images.topic_index}_shot_${image.shot_index}`
+          : null;
+
+        return (
+          <section key={`${displayIndex}-${idx}`} className="shot-card">
+            <div className="shot-card-header">
+              <div>
+                <div className="shot-card-title">分镜 {idx + 1}</div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                  shot_index: {displayIndex} / line: {idx + 1}
+                </div>
+              </div>
+              {shot ? (
+                <div style={{ width: 128 }}>
+                  <label style={{ fontSize: 12, color: "var(--muted)" }}>duration</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={shot.duration}
+                    onChange={(event) => onShotChange(idx, "duration", event.target.value)}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="shot-card-body">
+              <div className="shot-media-panel">
+                {image ? (
+                  <>
+                    <img
+                      src={assetUrl(image.image_path, imageToken)}
+                      alt={`shot ${displayIndex}`}
+                      className="shot-preview"
+                    />
+                    <div className="row" style={{ marginTop: 8 }}>
+                      <span className="badge">图片 shot {image.shot_index}</span>
+                      <span className="badge">{image.provider ?? "unknown"}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="shot-empty-preview">未找到对应图片</div>
+                )}
+              </div>
+
+              <div className="shot-fields">
+                <div className="field-group">
+                  <div className="field-group-title">口播文案</div>
+                  {line ? (
+                    <>
+                      <FieldInput
+                        label="estimated_seconds"
+                        value={String(line.estimated_seconds)}
+                        onChange={(value) => onScriptChange(idx, "estimated_seconds", value)}
+                      />
+                      <FieldTextarea
+                        label="text"
+                        value={line.text}
+                        onChange={(value) => onScriptChange(idx, "text", value)}
+                      />
+                    </>
+                  ) : (
+                    <div style={{ color: "var(--danger)", fontSize: 13 }}>未找到对应脚本文案。</div>
+                  )}
+                </div>
+
+                <div className="field-group">
+                  <div className="field-group-title">分镜信息</div>
+                  {shot ? (
+                    <>
+                      <FieldTextarea label="旁白" value={shot.narration} onChange={(value) => onShotChange(idx, "narration", value)} />
+                      <FieldTextarea label="画面" value={shot.visual} onChange={(value) => onShotChange(idx, "visual", value)} />
+                      <FieldTextarea label="B-roll" value={shot.broll} onChange={(value) => onShotChange(idx, "broll", value)} />
+                      <FieldTextarea label="字幕" value={shot.subtitle} onChange={(value) => onShotChange(idx, "subtitle", value)} />
+                    </>
+                  ) : (
+                    <div style={{ color: "var(--danger)", fontSize: 13 }}>未找到对应分镜。</div>
+                  )}
+                </div>
+
+                {image && imageItemId ? (
+                  <div className="field-group">
+                    <div className="field-group-title">图片信息</div>
+                    <ImageMetaEditor
+                      title={`shot ${image.shot_index}`}
+                      image={image}
+                      imageToken={imageToken}
+                      compact
+                      onChange={(key, value) => onImageChange("shot", image.shot_index, key, value)}
+                      onReplace={(file) => onImageReplace(imageItemId, `shot ${image.shot_index}`, file)}
+                      replacing={replacingItemId === imageItemId}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -628,25 +866,311 @@ function ImageMetaEditor({
   image,
   imageToken,
   onChange,
+  onReplace,
+  replacing,
+  compact = false,
 }: {
   title: string;
   image: ImageEntry;
   imageToken: string;
   onChange: (key: keyof ImageEntry, value: string) => void;
+  onReplace: (file: File) => void;
+  replacing: boolean;
+  compact?: boolean;
 }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = event.clipboardData.items;
+    for (const item of Array.from(items)) {
+      if (!item.type.startsWith("image/")) {
+        continue;
+      }
+      const file = item.getAsFile();
+      if (!file) {
+        continue;
+      }
+      event.preventDefault();
+      onReplace(file);
+      return;
+    }
+  };
+
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 10 }}>
+    <div
+      tabIndex={0}
+      onPaste={handlePaste}
+      style={{ border: compact ? "none" : "1px solid var(--line)", borderRadius: 12, padding: compact ? 0 : 10 }}
+    >
       <div style={{ fontWeight: 600 }}>{title}</div>
-      <img
-        src={assetUrl(image.image_path, imageToken)}
-        alt={title}
-        style={{ width: "100%", aspectRatio: "9 / 16", objectFit: "cover", borderRadius: 10, marginTop: 8 }}
-      />
+      {compact ? null : (
+        <img
+          src={assetUrl(image.image_path, imageToken)}
+          alt={title}
+          style={{ width: "100%", aspectRatio: "9 / 16", objectFit: "cover", borderRadius: 10, marginTop: 8 }}
+        />
+      )}
       <FieldInput label="provider" value={image.provider ?? ""} onChange={(value) => onChange("provider", value)} />
       <FieldInput label="query" value={image.query ?? ""} onChange={(value) => onChange("query", value)} />
       <FieldInput label="creator" value={image.creator ?? ""} onChange={(value) => onChange("creator", value)} />
       <FieldInput label="license" value={image.license ?? ""} onChange={(value) => onChange("license", value)} />
       <FieldTextarea label="source_url" value={image.source_url ?? ""} onChange={(value) => onChange("source_url", value)} />
+      <div className="row" style={{ marginTop: 8 }}>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (!file) {
+              return;
+            }
+            onReplace(file);
+            event.currentTarget.value = "";
+          }}
+        />
+        <button className="secondary" disabled={replacing} onClick={() => inputRef.current?.click()}>
+          {replacing ? "替换中..." : "上传并裁剪"}
+        </button>
+      </div>
+      <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 12 }}>点击此区域后可直接粘贴图片。</div>
+    </div>
+  );
+}
+
+interface ImageCropModalProps {
+  editor: CropEditorState;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (blob: Blob) => Promise<void>;
+  onPickAnother: (file: File) => void;
+}
+
+function ImageCropModal({ editor, busy, onClose, onSave, onPickAnother }: ImageCropModalProps) {
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startOffset: Point;
+  } | null>(null);
+
+  const [size, setSize] = useState<Size | null>(null);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
+  const [localMessage, setLocalMessage] = useState("");
+
+  const minScale = useMemo(() => {
+    if (!size) {
+      return 1;
+    }
+    return minCoverScale(size);
+  }, [size]);
+
+  const maxScale = Math.max(minScale * 4, minScale + 0.1);
+
+  useEffect(() => {
+    setSize(null);
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+    setLocalMessage("");
+  }, [editor.objectUrl]);
+
+  const onImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
+    const natural: Size = {
+      width: event.currentTarget.naturalWidth,
+      height: event.currentTarget.naturalHeight,
+    };
+    const firstScale = minCoverScale(natural);
+    setSize(natural);
+    setScale(firstScale);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!size) {
+      return;
+    }
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startOffset: offset,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!size || !dragRef.current || dragRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+    const dx = event.clientX - dragRef.current.startX;
+    const dy = event.clientY - dragRef.current.startY;
+    setOffset(clampOffset({
+      x: dragRef.current.startOffset.x + dx,
+      y: dragRef.current.startOffset.y + dy,
+    }, size, scale));
+  };
+
+  const clearDragging = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) {
+      return;
+    }
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const updateScale = (nextScale: number) => {
+    if (!size) {
+      return;
+    }
+    setScale(nextScale);
+    setOffset((prev) => clampOffset(prev, size, nextScale));
+  };
+
+  const saveCropped = async () => {
+    if (!size || !imageRef.current) {
+      return;
+    }
+
+    setLocalMessage("");
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1080;
+      canvas.height = 1920;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("Canvas is not supported");
+      }
+
+      const displayWidth = size.width * scale;
+      const displayHeight = size.height * scale;
+      const left = (VIEWPORT_SIZE.width - displayWidth) / 2 + offset.x;
+      const top = (VIEWPORT_SIZE.height - displayHeight) / 2 + offset.y;
+      const cropWidth = VIEWPORT_SIZE.width / scale;
+      const cropHeight = VIEWPORT_SIZE.height / scale;
+      const sourceX = Math.max(0, Math.min((0 - left) / scale, size.width - cropWidth));
+      const sourceY = Math.max(0, Math.min((0 - top) / scale, size.height - cropHeight));
+
+      ctx.drawImage(
+        imageRef.current,
+        sourceX,
+        sourceY,
+        cropWidth,
+        cropHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (value) => {
+            if (!value) {
+              reject(new Error("Failed to generate cropped image"));
+              return;
+            }
+            resolve(value);
+          },
+          "image/jpeg",
+          0.92,
+        );
+      });
+
+      await onSave(blob);
+    } catch (error) {
+      setLocalMessage(error instanceof Error ? error.message : "裁剪保存失败");
+    }
+  };
+
+  return (
+    <div className="crop-modal-backdrop">
+      <div className="panel crop-modal">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 18 }}>替换并裁剪：{editor.title}</div>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+              文件：{editor.fileName}。拖拽调整画面，或直接粘贴剪切板图片。
+            </div>
+          </div>
+          <button className="secondary" disabled={busy} onClick={onClose}>
+            关闭
+          </button>
+        </div>
+
+        <div className="crop-modal-grid">
+          <div>
+            <div
+              className="crop-viewport"
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={clearDragging}
+              onPointerCancel={clearDragging}
+            >
+              <img
+                ref={imageRef}
+                src={editor.objectUrl}
+                alt={editor.title}
+                onLoad={onImageLoad}
+                draggable={false}
+                style={{
+                  position: "absolute",
+                  top: "50%",
+                  left: "50%",
+                  width: size ? `${size.width * scale}px` : "auto",
+                  height: size ? `${size.height * scale}px` : "auto",
+                  transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px)`,
+                  userSelect: "none",
+                  pointerEvents: "none",
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", alignContent: "start", gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: "var(--muted)" }}>缩放</label>
+              <input
+                type="range"
+                min={minScale}
+                max={maxScale}
+                step={(maxScale - minScale) / 200 || 0.01}
+                value={scale}
+                onChange={(event) => updateScale(Number(event.target.value))}
+                disabled={!size || busy}
+              />
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>scale: {scale.toFixed(3)}</div>
+            </div>
+
+            <div className="row">
+              <input
+                ref={inputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (!file) {
+                    return;
+                  }
+                  onPickAnother(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <button className="secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
+                选择另一张图
+              </button>
+              <button className="primary" disabled={busy || !size} onClick={saveCropped}>
+                保存裁剪并替换
+              </button>
+            </div>
+
+            {localMessage ? <div style={{ color: "var(--danger)", fontSize: 13 }}>{localMessage}</div> : null}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -164,7 +164,7 @@ def _render_subtitle_images(
         max_title_width = style.video_w - 2 * style.text_side_margin
         wrapped_title = _wrap_text(title, style.max_chars_per_line, title_font, max_title_width)
         title_line_height = style.title_font_size + 8
-        title_start_y = 70
+        title_start_y = style.content_title_y
         for j, tline in enumerate(wrapped_title):
             tw = draw.textlength(tline, font=title_font)
             draw.text(
@@ -182,10 +182,11 @@ def _render_subtitle_images(
         line_height = style.subtitle_font_size + 20
         total_h = len(wrapped) * line_height
         start_y = int(style.video_h * style.subtitle_center_ratio) - total_h // 2
+        center_x = int(style.video_w * style.subtitle_center_x_ratio)
         for j, text_line in enumerate(wrapped):
             lw = draw.textlength(text_line, font=font)
             draw.text(
-                ((style.video_w - lw) / 2, start_y + j * line_height),
+                (center_x - lw / 2, start_y + j * line_height),
                 text_line,
                 font=font,
                 fill=style.text_color,
@@ -272,10 +273,11 @@ def _render_intro_image(
     line_height = style.cover_title_font_size + 18
     total_h = len(wrapped) * line_height
     start_y = title_center_y - total_h // 2
+    center_x = int(style.video_w * style.cover_title_center_x_ratio)
     for i, text_line in enumerate(wrapped):
         tw = draw.textlength(text_line, font=title_font)
         draw.text(
-            ((style.video_w - tw) / 2, start_y + i * line_height),
+            (center_x - tw / 2, start_y + i * line_height),
             text_line,
             font=title_font,
             fill=style.cover_title_color,

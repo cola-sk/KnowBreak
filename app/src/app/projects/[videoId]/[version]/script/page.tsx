@@ -1,7 +1,7 @@
 import { ReviewUnavailable } from "@/components/review-unavailable";
 import { ScriptReviewClient, type ScriptReviewPayload } from "@/components/script-review-client";
 import { StageHeader } from "@/components/stage-header";
-import { getStageData } from "@/lib/review-store";
+import { getReviewStatuses, getStageData } from "@/lib/review-store";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
@@ -16,9 +16,19 @@ export default async function ScriptReviewPage({ params }: Props) {
       "script",
     )) as ScriptReviewPayload;
     const title = initial.artifact.scripts[0]?.title;
+    const reviewStatuses = {
+      ...(await getReviewStatuses(videoId, version)),
+      script_review: initial.review.status,
+    };
     return (
       <main className="shell">
-        <StageHeader videoId={videoId} version={version} title={title} active="script" />
+        <StageHeader
+          videoId={videoId}
+          version={version}
+          title={title}
+          active="script"
+          reviewStatuses={reviewStatuses}
+        />
         <ScriptReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );

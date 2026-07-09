@@ -83,12 +83,15 @@ class ComposeProfile(BaseModel):
     bottom_overlay_alpha: int = 150
     cover_overlay_alpha: int = 120
     cover_title_overlay_alpha: int = 175
+    subtitle_center_x_ratio: float = 0.5
     subtitle_center_ratio: float = 0.45
+    cover_title_center_x_ratio: float = 0.5
     cover_title_center_ratio: float = 0.45
     progress_bar_ratio: float = 0.59
     progress_bar_width_ratio: float = 0.6
     progress_bar_enabled: bool = True
     cover_brand_y: int = 200
+    content_title_y: int = 70
     top_bar_height: int = 150
     top_gradient_height: int = 70
     subtitle_overlay_half_height: int = 220
