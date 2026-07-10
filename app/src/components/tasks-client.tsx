@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import type { JobStageProgress, StartJob, StartJobDetail } from "@/lib/start-store";
@@ -28,6 +29,9 @@ function statusClass(status: string | undefined): string {
   }
   if (status === "failed") {
     return "badge rejected";
+  }
+  if (status === "canceled") {
+    return "badge warning";
   }
   if (status === "running") {
     return "badge in_review";
@@ -137,9 +141,12 @@ export function TasksListClient({ initialJobs }: TasksListClientProps) {
 }
 
 export function TaskDetailClient({ initial }: TaskDetailClientProps) {
+  const router = useRouter();
   const [detail, setDetail] = useState(initial);
   const [lastUpdated, setLastUpdated] = useState<string>(() => new Date().toISOString());
   const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<"cancel" | "delete" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -152,6 +159,51 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const cancelJob = async () => {
+    if (!window.confirm("确定中断这个任务吗？正在等待审核或生成中的进程会被终止。")) {
+      return;
+    }
+    setActionLoading("cancel");
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/start/${detail.job.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const payload = (await response.json()) as StartJobDetail | { error?: string };
+      if (!response.ok || !("job" in payload)) {
+        throw new Error("error" in payload && payload.error ? payload.error : "中断任务失败");
+      }
+      setDetail(payload);
+      setLastUpdated(new Date().toISOString());
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "中断任务失败");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const deleteJob = async () => {
+    if (!window.confirm("确定删除这条任务记录吗？只删除启动记录和日志，不删除已生成项目文件。")) {
+      return;
+    }
+    setActionLoading("delete");
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/start/${detail.job.id}`, { method: "DELETE" });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "删除任务记录失败");
+      }
+      router.push("/tasks");
+      router.refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "删除任务记录失败");
+      setActionLoading(null);
     }
   };
 
@@ -186,12 +238,21 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
           <button type="button" className="btn secondary-btn compact-btn" onClick={refresh} disabled={loading}>
             {loading ? "刷新中" : "刷新状态"}
           </button>
+          {detail.job.status === "running" ? (
+            <button type="button" className="btn warn compact-btn" onClick={cancelJob} disabled={actionLoading !== null}>
+              {actionLoading === "cancel" ? "中断中" : "中断任务"}
+            </button>
+          ) : null}
+          <button type="button" className="btn secondary-btn compact-btn" onClick={deleteJob} disabled={actionLoading !== null}>
+            {actionLoading === "delete" ? "删除中" : "删除任务记录"}
+          </button>
           {detail.job.videoId && detail.job.version ? (
             <Link className="btn primary-btn compact-btn" href={`/projects/${detail.job.videoId}/${detail.job.version}/review`}>
               打开项目详情
             </Link>
           ) : null}
         </div>
+        {actionError ? <div className="task-error">{actionError}</div> : null}
         {detail.job.error ? <div className="task-error">{detail.job.error}</div> : null}
       </section>
 

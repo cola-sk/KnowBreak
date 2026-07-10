@@ -314,7 +314,7 @@ export async function POST(
       cwd: resolveProjectRoot(),
       env: {
         ...process.env,
-        KB_REVIEW_AUTO_APPROVE: "1",
+        KB_REVIEW_AUTO_APPROVE: "0",
         ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
       },
       stdio: ["ignore", "pipe", "pipe"],

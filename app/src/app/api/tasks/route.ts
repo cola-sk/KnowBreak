@@ -9,7 +9,7 @@ export async function GET() {
   const summaries = await Promise.all(jobs.map(async (job) => {
     const detail = await readJobDetail(job.id);
     return {
-      ...job,
+      ...(detail?.job ?? job),
       currentStage: detail?.currentStage ?? null,
       stages: detail?.stages ?? [],
     };

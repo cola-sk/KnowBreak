@@ -2,13 +2,14 @@ import { TasksListClient } from "@/components/tasks-client";
 import { listStartJobs, readJobDetail } from "@/lib/start-store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export default async function TasksPage() {
   const jobs = await listStartJobs();
   const summaries = await Promise.all(jobs.map(async (job) => {
     const detail = await readJobDetail(job.id);
     return {
-      ...job,
+      ...(detail?.job ?? job),
       currentStage: detail?.currentStage ?? null,
       stages: detail?.stages ?? [],
     };

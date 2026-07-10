@@ -1479,7 +1479,7 @@ a.tab.active {
 
 .cover-card {
   display: grid;
-  grid-template-columns: 140px 1fr;
+  grid-template-columns: 240px 1fr;
   gap: 20px;
   align-items: start;
 }
@@ -1519,6 +1519,98 @@ a.tab.active {
 .shot-media-panel {
   position: sticky;
   top: 80px;
+}
+
+.image-action-panel {
+  display: grid;
+  gap: 10px;
+  outline: none;
+}
+
+.image-action-panel:focus {
+  border-radius: 14px;
+  box-shadow: var(--focus-ring);
+}
+
+.image-preview-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.image-preview-button:hover {
+  transform: none;
+}
+
+.image-action-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.image-action-toolbar .compact-btn {
+  width: 100%;
+  min-width: 0;
+}
+
+.image-action-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.image-meta-details > summary {
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.image-meta-details[open] > summary {
+  margin-bottom: 8px;
+}
+
+.image-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 105;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.image-lightbox {
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 48px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.image-lightbox-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.image-lightbox img {
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  justify-self: center;
+  border-radius: 12px;
+  background: #090d16;
 }
 
 .shot-preview,

@@ -6,7 +6,7 @@ import { getVersionDir, listWorkflows, resolveOutDir } from "@/lib/review-store"
 
 export interface StartJob {
   id: string;
-  status: "running" | "succeeded" | "failed";
+  status: "running" | "succeeded" | "failed" | "canceled";
   input: string;
   source: string;
   workflow: string;
@@ -114,7 +114,8 @@ export async function listStartJobs(): Promise<StartJob[]> {
     const jobId = entry.name.replace(/\.json$/, "");
     const job = await readJobMeta(jobId);
     if (job) {
-      jobs.push(job);
+      const { text, updatedAt } = await readJobLog(jobId);
+      jobs.push(await normalizeJob(job, text, updatedAt));
     }
   }
   return jobs.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
@@ -126,15 +127,70 @@ export async function readJobDetail(jobId: string): Promise<StartJobDetail | nul
     return null;
   }
   const { text, updatedAt } = await readJobLog(jobId);
+  const normalizedJob = await normalizeJob(job, text, updatedAt);
   const currentStage = parseCurrentStage(text);
-  const stages = await buildStageProgress(job, currentStage);
+  const stages = await buildStageProgress(normalizedJob, currentStage);
   return {
-    job,
+    job: normalizedJob,
     stages,
     currentStage,
     logText: text,
     logUpdatedAt: updatedAt,
   };
+}
+
+export async function cancelStartJob(jobId: string): Promise<StartJob | null> {
+  const job = await readJobMeta(jobId);
+  if (!job) {
+    return null;
+  }
+
+  const { text, updatedAt } = await readJobLog(jobId);
+  const normalized = await normalizeJob(job, text, updatedAt);
+  if (normalized.status !== "running") {
+    return normalized;
+  }
+
+  if (!isProcessAlive(normalized.pid)) {
+    return normalizeJob(normalized, text, updatedAt);
+  }
+
+  try {
+    process.kill(normalized.pid!, "SIGTERM");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") {
+      return normalizeJob(normalized, text, updatedAt);
+    }
+    throw error;
+  }
+
+  const finishedAt = new Date().toISOString();
+  const canceled: StartJob = {
+    ...normalized,
+    status: "canceled",
+    finishedAt,
+    error: "用户中断了任务。",
+  };
+  await appendJobLog(jobId, `\n[start:canceled] ${finishedAt}\n`);
+  return writeJobMeta(canceled);
+}
+
+export async function deleteStartJob(jobId: string): Promise<boolean> {
+  const job = await readJobMeta(jobId);
+  if (!job) {
+    return false;
+  }
+
+  const { text, updatedAt } = await readJobLog(jobId);
+  const normalized = await normalizeJob(job, text, updatedAt);
+  if (normalized.status === "running" && isProcessAlive(normalized.pid)) {
+    throw new Error("任务仍在运行，请先中断任务再删除记录。");
+  }
+
+  await fs.rm(jobMetaPath(jobId), { force: true });
+  await fs.rm(jobLogPath(jobId), { force: true });
+  return true;
 }
 
 async function readJobLog(jobId: string): Promise<{ text: string; updatedAt: string | null }> {
@@ -149,6 +205,14 @@ async function readJobLog(jobId: string): Promise<{ text: string; updatedAt: str
     };
   } catch {
     return { text: "", updatedAt: null };
+  }
+}
+
+async function appendJobLog(jobId: string, text: string): Promise<void> {
+  try {
+    await fs.appendFile(jobLogPath(jobId), text, "utf-8");
+  } catch {
+    // Missing logs should not prevent status changes.
   }
 }
 
@@ -185,6 +249,9 @@ async function buildStageProgress(job: StartJob, currentStage: string | null): P
     if (job.status === "failed" && currentStage === stage) {
       status = "failed";
     }
+    if (job.status === "canceled" && currentStage === stage) {
+      status = "failed";
+    }
     return {
       stage,
       index,
@@ -211,16 +278,81 @@ async function artifactExistsForJob(job: StartJob, artifact: string): Promise<bo
 
 const VIDEO_ID_RE = /video_id\s*=\s*([A-Za-z0-9._-]+)/;
 const VERSION_RE = /version\s*=\s*([A-Za-z0-9._-]+)/;
+const OUTPUT_DIR_RE = /产出目录:\s*(\S+)/;
+const START_STATUS_RE = /\[start:(succeeded|failed|canceled)\]\s*([^\n\r]*)/;
 
-export function parseRunIds(line: string): { videoId?: string; version?: string } {
+export function parseRunIds(output: string): { videoId?: string; version?: string } {
+  const clean = stripAnsi(output);
   const result: { videoId?: string; version?: string } = {};
-  const v = VIDEO_ID_RE.exec(line);
+  const v = VIDEO_ID_RE.exec(clean);
   if (v) {
     result.videoId = v[1];
   }
-  const ver = VERSION_RE.exec(line);
+  const ver = VERSION_RE.exec(clean);
   if (ver) {
     result.version = ver[1];
   }
+  const dir = OUTPUT_DIR_RE.exec(clean);
+  if (dir) {
+    const outputDir = path.normalize(dir[1]);
+    result.version = result.version ?? path.basename(outputDir);
+    result.videoId = result.videoId ?? path.basename(path.dirname(outputDir));
+  }
   return result;
+}
+
+function parseStartStatus(output: string): Pick<StartJob, "status" | "finishedAt"> | null {
+  const clean = stripAnsi(output);
+  const match = START_STATUS_RE.exec(clean);
+  if (!match) {
+    return null;
+  }
+  const status = match[1] as StartJob["status"];
+  const finishedAt = match[2]?.trim();
+  return {
+    status,
+    finishedAt: finishedAt || undefined,
+  };
+}
+
+function isProcessAlive(pid?: number): boolean {
+  if (!pid || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function normalizeJob(job: StartJob, logText: string, logUpdatedAt: string | null): Promise<StartJob> {
+  let next = job;
+  const parsedIds = parseRunIds(logText);
+  const parsedStatus = parseStartStatus(logText);
+
+  if (parsedIds.videoId || parsedIds.version || parsedStatus) {
+    next = {
+      ...next,
+      videoId: parsedIds.videoId ?? next.videoId,
+      version: parsedIds.version ?? next.version,
+      status: parsedStatus?.status ?? next.status,
+      finishedAt: parsedStatus?.finishedAt ?? next.finishedAt,
+    };
+  }
+
+  if (next.status === "running" && next.pid && !isProcessAlive(next.pid)) {
+    next = {
+      ...next,
+      status: "failed",
+      finishedAt: logUpdatedAt ?? new Date().toISOString(),
+      error: next.error ?? "任务进程已退出但没有写入完成状态；请查看日志判断失败阶段。",
+    };
+  }
+
+  if (JSON.stringify(next) !== JSON.stringify(job)) {
+    await writeJobMeta(next);
+  }
+  return next;
 }

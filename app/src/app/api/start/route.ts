@@ -104,7 +104,7 @@ export async function POST(request: Request) {
       cwd: resolveProjectRoot(),
       env: {
         ...process.env,
-        KB_REVIEW_AUTO_APPROVE: "1",
+        KB_REVIEW_AUTO_APPROVE: "0",
         ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -117,15 +117,22 @@ export async function POST(request: Request) {
     child.stderr.pipe(logStream, { end: false });
 
     let finalized = false;
+    let capturedOutput = "";
     const finalize = async (patch: Partial<StartJob>) => {
       if (finalized) {
         return;
       }
       finalized = true;
       const current = (await readCurrent(jobId)) ?? running;
+      const parsed = parseRunIds(capturedOutput);
+      const preserveCanceled = current.status === "canceled";
       const finished: StartJob = {
         ...current,
         ...patch,
+        status: preserveCanceled ? "canceled" : patch.status ?? current.status,
+        videoId: current.videoId ?? parsed.videoId ?? null,
+        version: current.version ?? parsed.version ?? null,
+        error: preserveCanceled ? current.error : patch.error,
         finishedAt: new Date().toISOString(),
       };
       logStream.end(`\n[start:${finished.status}] ${finished.finishedAt}\n`);
@@ -135,6 +142,7 @@ export async function POST(request: Request) {
     const lineBuffer: string[] = [];
     child.stdout.on("data", async (chunk: Buffer) => {
       const text = chunk.toString("utf-8");
+      capturedOutput += text;
       lineBuffer.push(text);
       const joined = lineBuffer.join("");
       const lines = joined.split(/\r?\n/);

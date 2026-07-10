@@ -102,6 +102,11 @@ interface CropEditorState {
   fileName: string;
 }
 
+interface LightboxState {
+  title: string;
+  src: string;
+}
+
 interface Point {
   x: number;
   y: number;
@@ -201,6 +206,7 @@ export function ProductionReviewClient({ initial }: Props) {
   const [regenerating, setRegenerating] = useState(false);
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
   const [editor, setEditor] = useState<CropEditorState | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<"create" | "update">("update");
   const [startFrom, setStartFrom] = useState("tts");
@@ -440,6 +446,37 @@ export function ProductionReviewClient({ initial }: Props) {
           ...topic,
           shots: topic.shots.map((shot) =>
             shot.shot_index === shotIndex ? { ...shot, [key]: value } : shot,
+          ),
+        };
+      });
+      return { ...prev, artifacts: { ...prev.artifacts, images } };
+    });
+  };
+
+  const deleteImage = (kind: "cover" | "shot", shotIndex: number | undefined) => {
+    setData((prev) => {
+      if (!prev.artifacts.images) {
+        return prev;
+      }
+      const images = prev.artifacts.images.map((topic) => {
+        if (topic.topic_index !== topicIndex) {
+          return topic;
+        }
+        const cleared = {
+          image_path: "",
+          provider: "manual",
+          query: "",
+          source_url: "",
+          creator: "",
+          license: "",
+        };
+        if (kind === "cover" && topic.cover) {
+          return { ...topic, cover: cleared };
+        }
+        return {
+          ...topic,
+          shots: topic.shots.map((shot) =>
+            shot.shot_index === shotIndex ? { ...shot, ...cleared } : shot,
           ),
         };
       });
@@ -957,6 +994,8 @@ export function ProductionReviewClient({ initial }: Props) {
           onShotChange={updateShot}
           onImageChange={updateImage}
           onImageReplace={openEditorForFile}
+          onImageDelete={deleteImage}
+          onImageZoom={(title, src) => setLightbox({ title, src })}
         />
       </section>
 
@@ -967,6 +1006,14 @@ export function ProductionReviewClient({ initial }: Props) {
           onClose={closeEditor}
           onSave={uploadCroppedImage}
           onPickAnother={replaceEditorSource}
+        />
+      ) : null}
+
+      {lightbox ? (
+        <ImageLightbox
+          title={lightbox.title}
+          src={lightbox.src}
+          onClose={() => setLightbox(null)}
         />
       ) : null}
     </div>
@@ -983,6 +1030,8 @@ function GroupedTopicEditor({
   onShotChange,
   onImageChange,
   onImageReplace,
+  onImageDelete,
+  onImageZoom,
 }: {
   script: ScriptItem | null;
   board: StoryboardItem | null;
@@ -993,6 +1042,8 @@ function GroupedTopicEditor({
   onShotChange: (shotIndex: number, key: keyof Shot, value: string) => void;
   onImageChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
   onImageReplace: (itemId: string, title: string, file: File) => void;
+  onImageDelete: (kind: "cover" | "shot", shotIndex: number | undefined) => void;
+  onImageZoom: (title: string, src: string) => void;
 }) {
   const shotCount = Math.max(
     script?.lines.length ?? 0,
@@ -1011,23 +1062,28 @@ function GroupedTopicEditor({
           <div className="cover-summary">
             <div className="shot-card-title">封面</div>
             <div style={{ color: "var(--muted)", fontSize: 12 }}>不属于具体分镜，用于片头/封面图。</div>
-            <img
-              src={assetUrl(images.cover.image_path, imageToken)}
-              alt="封面图片"
-              className="cover-preview"
+            <ImageActionPanel
+              image={images.cover}
+              imageToken={imageToken}
+              title="封面图片"
+              itemId={`topic_${images.topic_index}_cover`}
+              replacing={replacingItemId === `topic_${images.topic_index}_cover`}
+              onReplace={(file) => onImageReplace(`topic_${images.topic_index}_cover`, "封面图片", file)}
+              onDelete={() => onImageDelete("cover", undefined)}
+              onZoom={(src) => onImageZoom("封面图片", src)}
             />
           </div>
           <div className="field-group">
-            <div className="field-group-title">封面图片信息</div>
+            <details className="image-meta-details">
+              <summary className="field-group-title">封面图片信息</summary>
             <ImageMetaEditor
               title="cover"
               image={images.cover}
               imageToken={imageToken}
               compact
               onChange={(key, value) => onImageChange("cover", undefined, key, value)}
-              onReplace={(file) => onImageReplace(`topic_${images.topic_index}_cover`, "封面图片", file)}
-              replacing={replacingItemId === `topic_${images.topic_index}_cover`}
             />
+            </details>
           </div>
         </div>
       ) : null}
@@ -1069,10 +1125,15 @@ function GroupedTopicEditor({
               <div className="shot-media-panel">
                 {image ? (
                   <>
-                    <img
-                      src={assetUrl(image.image_path, imageToken)}
-                      alt={`shot ${displayIndex}`}
-                      className="shot-preview"
+                    <ImageActionPanel
+                      image={image}
+                      imageToken={imageToken}
+                      title={`shot ${image.shot_index}`}
+                      itemId={imageItemId ?? `shot_${displayIndex}`}
+                      replacing={Boolean(imageItemId && replacingItemId === imageItemId)}
+                      onReplace={(file) => imageItemId && onImageReplace(imageItemId, `shot ${image.shot_index}`, file)}
+                      onDelete={() => onImageDelete("shot", image.shot_index)}
+                      onZoom={(src) => onImageZoom(`shot ${image.shot_index}`, src)}
                     />
                     <div className="row" style={{ marginTop: 8 }}>
                       <span className="badge">图片 shot {image.shot_index}</span>
@@ -1121,16 +1182,16 @@ function GroupedTopicEditor({
 
                 {image && imageItemId ? (
                   <div className="field-group">
-                    <div className="field-group-title">图片信息</div>
+                    <details className="image-meta-details">
+                      <summary className="field-group-title">图片信息</summary>
                     <ImageMetaEditor
                       title={`shot ${image.shot_index}`}
                       image={image}
                       imageToken={imageToken}
                       compact
                       onChange={(key, value) => onImageChange("shot", image.shot_index, key, value)}
-                      onReplace={(file) => onImageReplace(imageItemId, `shot ${image.shot_index}`, file)}
-                      replacing={replacingItemId === imageItemId}
                     />
+                    </details>
                   </div>
                 ) : null}
               </div>
@@ -1147,19 +1208,58 @@ function ImageMetaEditor({
   image,
   imageToken,
   onChange,
-  onReplace,
-  replacing,
   compact = false,
 }: {
   title: string;
   image: ImageEntry;
   imageToken: string;
   onChange: (key: keyof ImageEntry, value: string) => void;
-  onReplace: (file: File) => void;
-  replacing: boolean;
   compact?: boolean;
 }) {
+  return (
+    <div
+      style={{ border: compact ? "none" : "1px solid var(--line)", borderRadius: 12, padding: compact ? 0 : 10 }}
+    >
+      <div style={{ fontWeight: 600 }}>{title}</div>
+      {compact ? null : (
+        <img
+          src={assetUrl(image.image_path, imageToken)}
+          alt={title}
+          style={{ width: "100%", aspectRatio: "9 / 16", objectFit: "cover", borderRadius: 10, marginTop: 8 }}
+        />
+      )}
+      <FieldInput label="provider" value={image.provider ?? ""} onChange={(value) => onChange("provider", value)} />
+      <FieldInput label="query" value={image.query ?? ""} onChange={(value) => onChange("query", value)} />
+      <FieldInput label="creator" value={image.creator ?? ""} onChange={(value) => onChange("creator", value)} />
+      <FieldInput label="license" value={image.license ?? ""} onChange={(value) => onChange("license", value)} />
+      <FieldTextarea label="source_url" value={image.source_url ?? ""} onChange={(value) => onChange("source_url", value)} />
+    </div>
+  );
+}
+
+function ImageActionPanel({
+  image,
+  imageToken,
+  title,
+  itemId,
+  replacing,
+  onReplace,
+  onDelete,
+  onZoom,
+}: {
+  image: ImageEntry;
+  imageToken: string;
+  title: string;
+  itemId: string;
+  replacing: boolean;
+  onReplace: (file: File) => void;
+  onDelete: () => void;
+  onZoom: (src: string) => void;
+}) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const imageSrc = image.image_path ? assetUrl(image.image_path, imageToken) : "";
+
   const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     const items = event.clipboardData.items;
     for (const item of Array.from(items)) {
@@ -1177,25 +1277,19 @@ function ImageMetaEditor({
   };
 
   return (
-    <div
-      tabIndex={0}
-      onPaste={handlePaste}
-      style={{ border: compact ? "none" : "1px solid var(--line)", borderRadius: 12, padding: compact ? 0 : 10 }}
-    >
-      <div style={{ fontWeight: 600 }}>{title}</div>
-      {compact ? null : (
-        <img
-          src={assetUrl(image.image_path, imageToken)}
-          alt={title}
-          style={{ width: "100%", aspectRatio: "9 / 16", objectFit: "cover", borderRadius: 10, marginTop: 8 }}
-        />
+    <div ref={panelRef} className="image-action-panel" tabIndex={0} onPaste={handlePaste}>
+      {imageSrc ? (
+        <button type="button" className="image-preview-button" onClick={() => onZoom(imageSrc)}>
+          <img
+            src={imageSrc}
+            alt={title}
+            className="shot-preview"
+          />
+        </button>
+      ) : (
+        <div className="shot-empty-preview">图片已删除或未找到</div>
       )}
-      <FieldInput label="provider" value={image.provider ?? ""} onChange={(value) => onChange("provider", value)} />
-      <FieldInput label="query" value={image.query ?? ""} onChange={(value) => onChange("query", value)} />
-      <FieldInput label="creator" value={image.creator ?? ""} onChange={(value) => onChange("creator", value)} />
-      <FieldInput label="license" value={image.license ?? ""} onChange={(value) => onChange("license", value)} />
-      <FieldTextarea label="source_url" value={image.source_url ?? ""} onChange={(value) => onChange("source_url", value)} />
-      <div className="row" style={{ marginTop: 8 }}>
+      <div className="image-action-toolbar">
         <input
           ref={inputRef}
           type="file"
@@ -1210,11 +1304,45 @@ function ImageMetaEditor({
             event.currentTarget.value = "";
           }}
         />
-        <button className="secondary" disabled={replacing} onClick={() => inputRef.current?.click()}>
-          {replacing ? "替换中..." : "上传并裁剪"}
+        <button type="button" className="secondary compact-btn" disabled={!imageSrc} onClick={() => imageSrc && onZoom(imageSrc)}>
+          放大
+        </button>
+        <button type="button" className="secondary compact-btn" disabled={replacing} onClick={() => inputRef.current?.click()}>
+          {replacing ? "替换中" : "上传"}
+        </button>
+        <button type="button" className="secondary compact-btn" disabled={replacing} onClick={() => panelRef.current?.focus()}>
+          粘贴
+        </button>
+        <button
+          type="button"
+          className="warn compact-btn"
+          disabled={!image.image_path}
+          onClick={() => {
+            if (window.confirm("确认从当前成品审核中移除这张图片？不会删除磁盘原文件。")) {
+              onDelete();
+            }
+          }}
+        >
+          删除
         </button>
       </div>
-      <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 12 }}>点击此区域后可直接粘贴图片。</div>
+      <div className="image-action-hint">点击此区域后可直接粘贴图片。ID: {itemId}</div>
+    </div>
+  );
+}
+
+function ImageLightbox({ title, src, onClose }: { title: string; src: string; onClose: () => void }) {
+  return (
+    <div className="image-lightbox-backdrop" onClick={onClose}>
+      <div className="image-lightbox" onClick={(event) => event.stopPropagation()}>
+        <div className="image-lightbox-head">
+          <div className="section-title">{title}</div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </div>
+        <img src={src} alt={title} />
+      </div>
     </div>
   );
 }
