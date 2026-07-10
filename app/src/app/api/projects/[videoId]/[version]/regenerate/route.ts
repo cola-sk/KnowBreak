@@ -10,13 +10,32 @@ import type { RegenerationJob } from "@/lib/types";
 import {
   getProductionReviewData,
   getVersionDir,
+  listRegenerationJobs,
+  readRegenerationJob,
   resolveOutDir,
   resolveReviewRelativePath,
   resolveWorkflowCliName,
   writeRegenerationJob,
 } from "@/lib/review-store";
+import {
+  type StartJob,
+  jobLogPath,
+  jobMetaPath,
+  relativeJobLogPath,
+  writeJobMeta,
+} from "@/lib/start-store";
 
 export const runtime = "nodejs";
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ videoId: string; version: string }> },
+) {
+  const { videoId, version } = await context.params;
+  const jobs = await listRegenerationJobs(videoId, version);
+  const current = await readRegenerationJob(videoId, version);
+  return NextResponse.json({ jobs, current });
+}
 
 type VersionMode = "create" | "update";
 type CommandVersionMode = "legacy" | VersionMode;
@@ -108,12 +127,34 @@ function normalizeStartFrom(value: string | undefined): string | undefined {
   return value;
 }
 
+const URL_RE = /^(https?:\/\/|youtu\.be\/|youtube\.com)/i;
+
+function normalizeSource(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("source 不能为空");
+  }
+  if (URL_RE.test(trimmed) || trimmed.startsWith("manual:")) {
+    return trimmed;
+  }
+  return `manual:${trimmed}`;
+}
+
 async function persistJobCopies(
   videoId: string,
   versions: string[],
   job: RegenerationJob,
 ): Promise<void> {
   await Promise.all(versions.map((version) => writeRegenerationJob(videoId, version, job)));
+}
+
+async function readCurrentTask(jobId: string): Promise<StartJob | null> {
+  try {
+    const text = await fs.readFile(jobMetaPath(jobId), "utf-8");
+    return JSON.parse(text) as StartJob;
+  } catch {
+    return null;
+  }
 }
 
 async function listJsonFiles(dir: string): Promise<string[]> {
@@ -208,14 +249,12 @@ export async function POST(
     const mode: VersionMode = body.mode === "create" ? "create" : "update";
     const startFrom = normalizeStartFrom(body.startFrom);
     const currentData = await getProductionReviewData(videoId, currentVersion);
-    const source = (body.source?.trim() || currentData.source).trim();
+    const rawSource = (body.source?.trim() || currentData.source).trim();
+    const source = normalizeSource(rawSource);
     const workflow = await resolveWorkflowCliName(
       (body.workflow?.trim() || currentData.workflow || "serious_science_one").trim(),
     );
 
-    if (!source) {
-      throw new Error("source 不能为空");
-    }
     validateWorkflowName(workflow);
 
     let commandMode: CommandVersionMode = mode;
@@ -277,6 +316,8 @@ export async function POST(
       workflow,
       "--version-mode",
       commandMode,
+      "--video-id",
+      videoId,
     ];
 
     if (commandVersion) {
@@ -288,7 +329,11 @@ export async function POST(
 
     const jobId = randomUUID();
     const logPath = path.join(getVersionDir(videoId, jobVersion), "reviews", `regenerate_${jobId}.log`);
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
+    const taskLogPath = jobLogPath(jobId);
+    await Promise.all([
+      fs.mkdir(path.dirname(logPath), { recursive: true }),
+      fs.mkdir(path.dirname(taskLogPath), { recursive: true }),
+    ]);
 
     const job: RegenerationJob = {
       id: jobId,
@@ -303,12 +348,35 @@ export async function POST(
       logPath: resolveReviewRelativePath(logPath),
       startedAt: new Date().toISOString(),
     };
+    const taskJob: StartJob = {
+      id: jobId,
+      taskType: "regenerate",
+      status: "running",
+      input: `重新生成 ${videoId}/${currentVersion}${targetVersion && targetVersion !== currentVersion ? ` -> ${targetVersion}` : ""}`,
+      source,
+      workflow,
+      videoId,
+      version: targetVersion ?? jobVersion,
+      command: ["uv", ...args],
+      logPath: relativeJobLogPath(jobId),
+      startedAt: job.startedAt,
+      mode,
+      requestedFromVersion: currentVersion,
+      targetVersion,
+      startFrom,
+    };
 
     const mirrorVersions = Array.from(new Set([currentVersion, jobVersion]));
-    await persistJobCopies(videoId, mirrorVersions, job);
+    await Promise.all([
+      persistJobCopies(videoId, mirrorVersions, job),
+      writeJobMeta(taskJob),
+    ]);
 
     const logStream = createWriteStream(logPath, { flags: "a" });
-    logStream.write(`$ uv ${args.map((arg) => JSON.stringify(arg)).join(" ")}\n\n`);
+    const taskLogStream = createWriteStream(taskLogPath, { flags: "a" });
+    const commandLine = `$ uv ${args.map((arg) => JSON.stringify(arg)).join(" ")}\n\n`;
+    logStream.write(commandLine);
+    taskLogStream.write(commandLine);
 
     const child = spawn("uv", args, {
       cwd: resolveProjectRoot(),
@@ -321,10 +389,16 @@ export async function POST(
     });
 
     const runningJob = { ...job, pid: child.pid } satisfies RegenerationJob;
-    await persistJobCopies(videoId, mirrorVersions, runningJob);
+    const runningTask = { ...taskJob, pid: child.pid } satisfies StartJob;
+    await Promise.all([
+      persistJobCopies(videoId, mirrorVersions, runningJob),
+      writeJobMeta(runningTask),
+    ]);
 
     child.stdout.pipe(logStream, { end: false });
     child.stderr.pipe(logStream, { end: false });
+    child.stdout.pipe(taskLogStream, { end: false });
+    child.stderr.pipe(taskLogStream, { end: false });
 
     let finalized = false;
     const finalize = async (patch: Partial<RegenerationJob>) => {
@@ -337,8 +411,23 @@ export async function POST(
         ...patch,
         finishedAt: new Date().toISOString(),
       };
+      const currentTask = (await readCurrentTask(jobId)) ?? runningTask;
+      const taskStatus = currentTask.status === "canceled"
+        ? "canceled"
+        : finished.status === "succeeded" ? "succeeded" : "failed";
+      const finishedTask: StartJob = {
+        ...currentTask,
+        status: taskStatus,
+        finishedAt: finished.finishedAt,
+        exitCode: typeof patch.exitCode === "number" ? patch.exitCode : currentTask.exitCode,
+        error: taskStatus === "canceled" ? currentTask.error : patch.error,
+      };
       logStream.end(`\n[regenerate:${finished.status}] ${finished.finishedAt}\n`);
-      await persistJobCopies(videoId, mirrorVersions, finished);
+      taskLogStream.end(`\n[start:${finishedTask.status}] ${finishedTask.finishedAt}\n`);
+      await Promise.all([
+        persistJobCopies(videoId, mirrorVersions, finished),
+        writeJobMeta(finishedTask),
+      ]);
     };
 
     child.on("error", (error) => {

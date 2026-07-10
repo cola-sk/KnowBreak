@@ -110,7 +110,7 @@ async function generateCloudflareWorkersImage(request: TextToImageRequest): Prom
 
   const resolvedModel = request.model?.trim()
     || process.env.KB_CLOUDFLARE_IMAGE_MODEL
-    || "@cf/bytedance/stable-diffusion-xl-lightning";
+    || "@cf/black-forest-labs/flux-1-schnell";
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${resolvedModel}`,
     {
@@ -119,7 +119,7 @@ async function generateCloudflareWorkersImage(request: TextToImageRequest): Prom
         Authorization: `Bearer ${apiToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, width, height }),
     },
   );
   if (!response.ok) {
@@ -133,9 +133,15 @@ async function generateCloudflareWorkersImage(request: TextToImageRequest): Prom
     if (!imageBase64) {
       throw new Error("Cloudflare Workers AI returned JSON without result.image");
     }
+    const bytes = new Uint8Array(Buffer.from(imageBase64, "base64"));
+    const detectedType = bytes[0] === 0xff && bytes[1] === 0xd8
+      ? "image/jpeg"
+      : bytes[0] === 0x89 && bytes[1] === 0x50
+        ? "image/png"
+        : "image/png";
     return {
-      bytes: new Uint8Array(Buffer.from(imageBase64, "base64")),
-      contentType: "image/png",
+      bytes,
+      contentType: detectedType,
       metadata: {
         provider: "cloudflare_workers",
         mode: "generate",
@@ -183,8 +189,8 @@ async function generateHuggingFaceImage(request: TextToImageRequest): Promise<Te
 
   const resolvedModel = request.model?.trim()
     || process.env.KB_HUGGINGFACE_IMAGE_MODEL
-    || "stabilityai/stable-diffusion-xl-base-1.0";
-  const baseUrl = (process.env.KB_HUGGINGFACE_IMAGE_BASE_URL || "https://api-inference.huggingface.co/models")
+    || "black-forest-labs/FLUX.1-schnell";
+  const baseUrl = (process.env.KB_HUGGINGFACE_IMAGE_BASE_URL || "https://router.huggingface.co/hf-inference/models")
     .replace(/\/$/, "");
   const response = await fetch(`${baseUrl}/${resolvedModel}`, {
     method: "POST",

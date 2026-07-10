@@ -98,7 +98,7 @@ def _generate_cloudflare_workers(
     r = httpx.post(
         url,
         headers={"Authorization": f"Bearer {cfg.cloudflare_api_token}"},
-        json={"prompt": prompt},
+        json={"prompt": prompt, "width": width, "height": height},
         timeout=90,
     )
     r.raise_for_status()

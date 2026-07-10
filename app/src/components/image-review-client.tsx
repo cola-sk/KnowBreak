@@ -129,8 +129,8 @@ const VIEWPORT_SIZE: Size = {
 
 const IMAGE_PROVIDER_OPTIONS = [
   { value: "pollinations", label: "Pollinations", defaultModel: "" },
-  { value: "cloudflare_workers", label: "Cloudflare Workers AI", defaultModel: "@cf/bytedance/stable-diffusion-xl-lightning" },
-  { value: "huggingface", label: "Hugging Face", defaultModel: "stabilityai/stable-diffusion-xl-base-1.0" },
+  { value: "cloudflare_workers", label: "Cloudflare Workers AI", defaultModel: "@cf/black-forest-labs/flux-1-schnell" },
+  { value: "huggingface", label: "Hugging Face", defaultModel: "black-forest-labs/FLUX.1-schnell" },
 ];
 
 function defaultModelForProvider(provider: string): string {
@@ -771,7 +771,7 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
 
   return (
     <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
-      <div className="image-lightbox" style={{ maxWidth: 760 }}>
+      <div className="image-lightbox image-generate-modal" style={{ maxWidth: 760 }}>
         <div className="image-lightbox-head">
           <div>
             <div style={{ fontWeight: 700 }}>AI 生成替换</div>
@@ -781,75 +781,77 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
             关闭
           </button>
         </div>
-        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-          <label style={{ fontSize: 12, color: "var(--muted)" }}>provider</label>
-          <select
-            value={editor.provider}
-            disabled={busy}
-            onChange={(event) => {
-              const provider = event.target.value;
-              onChange({
+        <div className="image-generate-body">
+          <div className="form-row">
+            <label className="form-label">provider</label>
+            <select
+              value={editor.provider}
+              disabled={busy}
+              onChange={(event) => {
+                const provider = event.target.value;
+                onChange({
+                  ...editor,
+                  provider,
+                  model: defaultModelForProvider(provider),
+                  previewImageBase64: undefined,
+                  previewContentType: undefined,
+                  previewMetadata: undefined,
+                });
+              }}
+            >
+              {IMAGE_PROVIDER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-row">
+            <label className="form-label">model</label>
+            <input
+              value={editor.model}
+              disabled={busy}
+              placeholder="使用 provider 默认模型"
+              onChange={(event) => onChange({
                 ...editor,
-                provider,
-                model: defaultModelForProvider(provider),
+                model: event.target.value,
                 previewImageBase64: undefined,
                 previewContentType: undefined,
                 previewMetadata: undefined,
-              });
-            }}
-          >
-            {IMAGE_PROVIDER_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <label style={{ fontSize: 12, color: "var(--muted)" }}>model</label>
-          <input
-            value={editor.model}
-            disabled={busy}
-            placeholder="使用 provider 默认模型"
-            onChange={(event) => onChange({
-              ...editor,
-              model: event.target.value,
-              previewImageBase64: undefined,
-              previewContentType: undefined,
-              previewMetadata: undefined,
-            })}
-          />
-          <label style={{ fontSize: 12, color: "var(--muted)" }}>prompt</label>
-          <textarea
-            value={editor.prompt}
-            disabled={busy}
-            rows={8}
-            onChange={(event) => onChange({
-              ...editor,
-              prompt: event.target.value,
-              previewImageBase64: undefined,
-              previewContentType: undefined,
-              previewMetadata: undefined,
-            })}
-          />
-          {previewSrc ? (
-            <img
-              src={previewSrc}
-              alt="AI 生成预览"
-              style={{
-                width: "100%",
-                maxHeight: 520,
-                objectFit: "contain",
-                border: "1px solid var(--line)",
-                borderRadius: 10,
-              }}
+              })}
             />
-          ) : null}
+          </div>
+          <div className="form-row">
+            <label className="form-label">prompt</label>
+            <textarea
+              value={editor.prompt}
+              disabled={busy}
+              rows={5}
+              onChange={(event) => onChange({
+                ...editor,
+                prompt: event.target.value,
+                previewImageBase64: undefined,
+                previewContentType: undefined,
+                previewMetadata: undefined,
+              })}
+            />
+          </div>
+          <div className="image-generate-preview-slot">
+            {previewSrc ? (
+              <img src={previewSrc} alt="AI 生成预览" />
+            ) : (
+              <div className="empty">
+                {busy ? "生成中..." : "尚未生成预览，点击下方按钮开始"}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+        <div className="image-generate-footer">
           <button className="secondary" disabled={busy} onClick={onClose}>
             取消
           </button>
           <button className="secondary" disabled={busy} onClick={onGeneratePreview}>
-            {busy ? "生成中..." : "生成预览"}
+            {busy ? "生成中..." : previewSrc ? "重新生成预览" : "生成预览"}
           </button>
           <button className="approve-btn" disabled={busy || !previewSrc} onClick={onInsert}>
             {busy ? "插入中..." : "插入替换"}

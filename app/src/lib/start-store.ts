@@ -3,9 +3,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { getVersionDir, listWorkflows, resolveOutDir } from "@/lib/review-store";
+import type { RegenerationJob } from "@/lib/types";
 
 export interface StartJob {
   id: string;
+  taskType?: "start" | "regenerate";
   status: "running" | "succeeded" | "failed" | "canceled";
   input: string;
   source: string;
@@ -15,6 +17,10 @@ export interface StartJob {
   command: string[];
   logPath: string;
   startedAt: string;
+  mode?: "create" | "update";
+  requestedFromVersion?: string;
+  targetVersion?: string;
+  startFrom?: string;
   pid?: number;
   finishedAt?: string;
   exitCode?: number;
@@ -88,7 +94,7 @@ export async function writeJobMeta(job: StartJob): Promise<StartJob> {
 
 export async function readJobMeta(jobId: string): Promise<StartJob | null> {
   if (!existsSync(jobMetaPath(jobId))) {
-    return null;
+    return findLegacyRegenerationTask(jobId);
   }
   try {
     const text = await fs.readFile(jobMetaPath(jobId), "utf-8");
@@ -103,10 +109,11 @@ export async function listStartJobs(): Promise<StartJob[]> {
   try {
     entries = await fs.readdir(jobsDir(), { withFileTypes: true });
   } catch {
-    return [];
+    entries = [];
   }
 
   const jobs: StartJob[] = [];
+  const seenJobIds = new Set<string>();
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) {
       continue;
@@ -114,9 +121,14 @@ export async function listStartJobs(): Promise<StartJob[]> {
     const jobId = entry.name.replace(/\.json$/, "");
     const job = await readJobMeta(jobId);
     if (job) {
-      const { text, updatedAt } = await readJobLog(jobId);
+      seenJobIds.add(job.id);
+      const { text, updatedAt } = await readJobLogForMeta(job);
       jobs.push(await normalizeJob(job, text, updatedAt));
     }
+  }
+  for (const job of await listLegacyRegenerationTasks(seenJobIds)) {
+    const { text, updatedAt } = await readJobLogForMeta(job);
+    jobs.push(await normalizeJob(job, text, updatedAt));
   }
   return jobs.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
 }
@@ -126,7 +138,7 @@ export async function readJobDetail(jobId: string): Promise<StartJobDetail | nul
   if (!job) {
     return null;
   }
-  const { text, updatedAt } = await readJobLog(jobId);
+  const { text, updatedAt } = await readJobLogForMeta(job);
   const normalizedJob = await normalizeJob(job, text, updatedAt);
   const currentStage = parseCurrentStage(text);
   const stages = await buildStageProgress(normalizedJob, currentStage);
@@ -194,7 +206,25 @@ export async function deleteStartJob(jobId: string): Promise<boolean> {
 }
 
 async function readJobLog(jobId: string): Promise<{ text: string; updatedAt: string | null }> {
-  const filePath = jobLogPath(jobId);
+  return readJobLogFile(jobLogPath(jobId));
+}
+
+async function readJobLogForMeta(job: StartJob): Promise<{ text: string; updatedAt: string | null }> {
+  const primary = await readJobLog(job.id);
+  if (primary.text || primary.updatedAt || !job.logPath) {
+    return primary;
+  }
+  return readJobLogFile(resolveStoredLogPath(job.logPath));
+}
+
+function resolveStoredLogPath(storedPath: string): string {
+  if (path.isAbsolute(storedPath)) {
+    return storedPath;
+  }
+  return path.join(resolveOutDir(), storedPath);
+}
+
+async function readJobLogFile(filePath: string): Promise<{ text: string; updatedAt: string | null }> {
   try {
     const stat = await fs.stat(filePath);
     const text = await fs.readFile(filePath, "utf-8");
@@ -206,6 +236,194 @@ async function readJobLog(jobId: string): Promise<{ text: string; updatedAt: str
   } catch {
     return { text: "", updatedAt: null };
   }
+}
+
+async function listLegacyRegenerationTasks(excludeJobIds = new Set<string>()): Promise<StartJob[]> {
+  const outDir = resolveOutDir();
+  const tasks: StartJob[] = [];
+
+  async function readEntries(dir: string): Promise<Array<import("node:fs").Dirent>> {
+    let entries: Array<import("node:fs").Dirent> = [];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    return entries;
+  }
+
+  async function collectFromReviewsDir(reviewsDir: string): Promise<void> {
+    for (const entry of await readEntries(reviewsDir)) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      let match = /^regenerate_([0-9a-f-]{36})\.json$/i.exec(entry.name);
+      if (!match || excludeJobIds.has(match[1])) {
+        match = /^regenerate_([0-9a-f-]{36})\.log$/i.exec(entry.name);
+        if (!match || excludeJobIds.has(match[1])) {
+          continue;
+        }
+        const task = await readLegacyRegenerationTaskFromLog(path.join(reviewsDir, entry.name), match[1]);
+        if (task) {
+          excludeJobIds.add(task.id);
+          tasks.push(task);
+        }
+        continue;
+      }
+      const task = await readLegacyRegenerationTaskFromFile(path.join(reviewsDir, entry.name));
+      if (task) {
+        excludeJobIds.add(task.id);
+        tasks.push(task);
+      }
+    }
+  }
+
+  for (const videoEntry of await readEntries(outDir)) {
+    if (!videoEntry.isDirectory() || videoEntry.name === "_start_jobs") {
+      continue;
+    }
+    const videoDir = path.join(outDir, videoEntry.name);
+    await collectFromReviewsDir(path.join(videoDir, "reviews"));
+    for (const versionEntry of await readEntries(videoDir)) {
+      if (!versionEntry.isDirectory() || versionEntry.name === "reviews") {
+        continue;
+      }
+      await collectFromReviewsDir(path.join(videoDir, versionEntry.name, "reviews"));
+    }
+  }
+  return tasks;
+}
+
+async function findLegacyRegenerationTask(jobId: string): Promise<StartJob | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(jobId)) {
+    return null;
+  }
+  const matches = await listLegacyRegenerationTasks(new Set());
+  return matches.find((job) => job.id === jobId) ?? null;
+}
+
+async function readLegacyRegenerationTaskFromFile(filePath: string): Promise<StartJob | null> {
+  let job: RegenerationJob | null = null;
+  try {
+    job = JSON.parse(await fs.readFile(filePath, "utf-8")) as RegenerationJob;
+  } catch {
+    return null;
+  }
+  if (!job?.id) {
+    return null;
+  }
+
+  const rel = path.relative(resolveOutDir(), filePath);
+  const segments = rel.split(path.sep);
+  const videoId = segments[0] ?? null;
+  const version = segments.length >= 4 ? segments[1] : "legacy";
+  const target = job.targetVersion ?? version;
+  return {
+    id: job.id,
+    taskType: "regenerate",
+    status: job.status,
+    input: `重新生成 ${videoId ?? "-"} / ${job.requestedFromVersion ?? version}${target && target !== (job.requestedFromVersion ?? version) ? ` -> ${target}` : ""}`,
+    source: job.source,
+    workflow: job.workflow,
+    videoId,
+    version: target,
+    command: job.command,
+    logPath: job.logPath,
+    startedAt: job.startedAt,
+    mode: job.mode,
+    requestedFromVersion: job.requestedFromVersion,
+    targetVersion: job.targetVersion,
+    startFrom: job.startFrom,
+    pid: job.pid,
+    finishedAt: job.finishedAt,
+    exitCode: typeof job.exitCode === "number" ? job.exitCode : undefined,
+    error: job.error,
+  };
+}
+
+async function readLegacyRegenerationTaskFromLog(filePath: string, jobId: string): Promise<StartJob | null> {
+  let raw = "";
+  let mtime = Date.now();
+  try {
+    const stat = await fs.stat(filePath);
+    raw = await fs.readFile(filePath, "utf-8");
+    mtime = stat.mtimeMs;
+  } catch {
+    return null;
+  }
+
+  const rel = path.relative(resolveOutDir(), filePath);
+  const segments = rel.split(path.sep);
+  const videoId = segments[0] ?? null;
+  const version = segments.length >= 4 ? segments[1] : "legacy";
+  const finishMatch = /\[regenerate:(succeeded|failed)\]\s+(\S+)/.exec(raw);
+  const status = finishMatch ? (finishMatch[1] as StartJob["status"]) : "running";
+  const commandLine = raw.split(/\r?\n/)[0]?.replace(/^\$\s*/, "") ?? "";
+  const command = commandLine ? parseCommandString(commandLine) : [];
+  const source = command[4] ?? "";
+  const workflow = commandValue(command, "--workflow") ?? "";
+  const mode = commandValue(command, "--version-mode") === "create" ? "create" : "update";
+  const targetVersion = commandValue(command, "--version") ?? version;
+  const startFrom = commandValue(command, "--from");
+  const errorLine = /(?:error|traceback|valueerror|filenotfounderror)[: ]([^\n]+)/i.exec(raw);
+
+  return {
+    id: jobId,
+    taskType: "regenerate",
+    status,
+    input: `重新生成 ${videoId ?? "-"} / ${version}`,
+    source,
+    workflow,
+    videoId,
+    version: targetVersion,
+    command,
+    logPath: rel,
+    startedAt: new Date(mtime).toISOString(),
+    mode,
+    requestedFromVersion: version,
+    targetVersion,
+    startFrom,
+    finishedAt: finishMatch?.[2],
+    error: status === "failed" ? (errorLine?.[1]?.slice(0, 200) ?? "regeneration failed") : undefined,
+  };
+}
+
+function commandValue(command: string[], flag: string): string | undefined {
+  const index = command.indexOf(flag);
+  if (index < 0) {
+    return undefined;
+  }
+  return command[index + 1];
+}
+
+function parseCommandString(line: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    while (i < line.length && /\s/.test(line[i])) {
+      i += 1;
+    }
+    if (i >= line.length) {
+      break;
+    }
+    const quote = line[i] === "\"" || line[i] === "'" ? line[i] : null;
+    if (quote) {
+      i += 1;
+      const start = i;
+      while (i < line.length && line[i] !== quote) {
+        i += 1;
+      }
+      tokens.push(line.slice(start, i));
+      i += 1;
+      continue;
+    }
+    const start = i;
+    while (i < line.length && !/\s/.test(line[i])) {
+      i += 1;
+    }
+    tokens.push(line.slice(start, i));
+  }
+  return tokens;
 }
 
 async function appendJobLog(jobId: string, text: string): Promise<void> {

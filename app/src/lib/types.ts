@@ -65,3 +65,10 @@ export interface RegenerationJob {
   exitCode?: number | null;
   error?: string;
 }
+
+export interface RegenerationJobDetail {
+  job: RegenerationJob;
+  logText: string;
+  logUpdatedAt: string | null;
+  currentStage: string | null;
+}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
-import type { RegenerationJob, ReviewFile, ReviewStage } from "@/lib/types";
+import type { RegenerationJob, RegenerationJobDetail, ReviewFile, ReviewStage } from "@/lib/types";
 
 interface ScriptLine {
   text: string;
@@ -92,6 +92,7 @@ export interface ProductionReviewPayload {
   };
   reviews: Partial<Record<ReviewStage, ReviewFile>>;
   job: RegenerationJob | null;
+  regenerationJobs: RegenerationJob[];
   projectOverrides?: Record<string, any>;
 }
 
@@ -153,8 +154,8 @@ const VIEWPORT_SIZE: Size = {
 
 const IMAGE_PROVIDER_OPTIONS = [
   { value: "pollinations", label: "Pollinations", defaultModel: "" },
-  { value: "cloudflare_workers", label: "Cloudflare Workers AI", defaultModel: "@cf/bytedance/stable-diffusion-xl-lightning" },
-  { value: "huggingface", label: "Hugging Face", defaultModel: "stabilityai/stable-diffusion-xl-base-1.0" },
+  { value: "cloudflare_workers", label: "Cloudflare Workers AI", defaultModel: "@cf/black-forest-labs/flux-1-schnell" },
+  { value: "huggingface", label: "Hugging Face", defaultModel: "black-forest-labs/FLUX.1-schnell" },
 ];
 
 function defaultModelForProvider(provider: string): string {
@@ -256,6 +257,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => new Date().toISOString());
   const [refreshing, setRefreshing] = useState(false);
+  const [activeJobDetail, setActiveJobDetail] = useState<RegenerationJobDetail | null>(null);
+  const [showJobLog, setShowJobLog] = useState(false);
 
   // Project overrides state
   const [projectOverrides, setProjectOverrides] = useState<Record<string, any>>(() => initial.projectOverrides ?? {});
@@ -398,6 +401,32 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
       }
     };
   }, [editor]);
+
+  useEffect(() => {
+    if (data.job?.status !== "running") {
+      setActiveJobDetail(null);
+      return;
+    }
+    const jobId = data.job.id;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/projects/${data.videoId}/${data.version}/regenerate/${jobId}`, { cache: "no-store" });
+        const payload = (await response.json()) as RegenerationJobDetail | { error?: string };
+        if (!cancelled && response.ok && "job" in payload) {
+          setActiveJobDetail(payload);
+        }
+      } catch {
+        // swallow transient network errors during polling
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [data.job?.id, data.job?.status, data.videoId, data.version]);
 
   useEffect(() => {
     if (data.job?.status !== "running") {
@@ -760,10 +789,15 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
       if (!response.ok || !payload.job) {
         throw new Error(payload.error ?? "启动重生成失败");
       }
-      setData((prev) => ({ ...prev, job: payload.job! }));
+      setData((prev) => ({
+        ...prev,
+        job: payload.job!,
+        regenerationJobs: [payload.job!, ...prev.regenerationJobs],
+      }));
+      setShowJobLog(true);
       setMessage(saveBeforeRun
-        ? "已保存修改，并启动重生成任务。日志会写入版本 reviews 目录；任务完成后刷新页面查看新视频。"
-        : "重生成任务已启动。日志会写入版本 reviews 目录；任务完成后刷新页面查看新视频。");
+        ? "已保存修改，并启动重生成任务；下方可查看实时进度。"
+        : "重生成任务已启动；下方可查看实时进度。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "启动重生成失败");
     } finally {
@@ -909,25 +943,24 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
           </div>
 
           {data.job ? (
-            <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
-              <div className="row" style={{ alignItems: "center" }}>
-                <span className={statusClass(data.job.status)}>job: {data.job.status}</span>
-                {data.job.targetVersion ? <span className="badge">target: {data.job.targetVersion}</span> : null}
-                {data.job.pid ? <span className="badge">pid: {data.job.pid}</span> : null}
-              </div>
-              <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 12, wordBreak: "break-all" }}>
-                log: {data.job.logPath}
-              </div>
-              {data.job.targetVersion ? (
-                <Link
-                  href={`/projects/${data.videoId}/${data.job.targetVersion}/review`}
-                  style={{ display: "inline-flex", marginTop: 8, color: "var(--accent)", fontSize: 13 }}
-                >
-                  打开目标版本
-                </Link>
-              ) : null}
-              {data.job.error ? <div style={{ color: "var(--danger)", marginTop: 8 }}>{data.job.error}</div> : null}
-            </div>
+            <RegenerationProgressCard
+              job={data.job}
+              detail={activeJobDetail}
+              showLog={showJobLog}
+              onShowLog={() => setShowJobLog(true)}
+              onCloseLog={() => setShowJobLog(false)}
+              videoId={data.videoId}
+              version={data.version}
+            />
+          ) : null}
+
+          {data.regenerationJobs.length > 0 ? (
+            <RegenerationHistoryList
+              jobs={data.regenerationJobs}
+              currentJobId={data.job?.id}
+              videoId={data.videoId}
+              version={data.version}
+            />
           ) : null}
 
           {message ? <div style={{ marginTop: 12, color: "var(--muted)" }}>{message}</div> : null}
@@ -1364,7 +1397,7 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
 
   return (
     <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
-      <div className="image-lightbox" style={{ maxWidth: 760 }}>
+      <div className="image-lightbox image-generate-modal" style={{ maxWidth: 760 }}>
         <div className="image-lightbox-head">
           <div>
             <div className="section-title">AI 生成替换</div>
@@ -1374,75 +1407,77 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
             关闭
           </button>
         </div>
-        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-          <label style={{ fontSize: 12, color: "var(--muted)" }}>provider</label>
-          <select
-            value={editor.provider}
-            disabled={busy}
-            onChange={(event) => {
-              const provider = event.target.value;
-              onChange({
+        <div className="image-generate-body">
+          <div className="form-row">
+            <label className="form-label">provider</label>
+            <select
+              value={editor.provider}
+              disabled={busy}
+              onChange={(event) => {
+                const provider = event.target.value;
+                onChange({
+                  ...editor,
+                  provider,
+                  model: defaultModelForProvider(provider),
+                  previewImageBase64: undefined,
+                  previewContentType: undefined,
+                  previewMetadata: undefined,
+                });
+              }}
+            >
+              {IMAGE_PROVIDER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-row">
+            <label className="form-label">model</label>
+            <input
+              value={editor.model}
+              disabled={busy}
+              placeholder="使用 provider 默认模型"
+              onChange={(event) => onChange({
                 ...editor,
-                provider,
-                model: defaultModelForProvider(provider),
+                model: event.target.value,
                 previewImageBase64: undefined,
                 previewContentType: undefined,
                 previewMetadata: undefined,
-              });
-            }}
-          >
-            {IMAGE_PROVIDER_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <label style={{ fontSize: 12, color: "var(--muted)" }}>model</label>
-          <input
-            value={editor.model}
-            disabled={busy}
-            placeholder="使用 provider 默认模型"
-            onChange={(event) => onChange({
-              ...editor,
-              model: event.target.value,
-              previewImageBase64: undefined,
-              previewContentType: undefined,
-              previewMetadata: undefined,
-            })}
-          />
-          <label style={{ fontSize: 12, color: "var(--muted)" }}>prompt</label>
-          <textarea
-            value={editor.prompt}
-            disabled={busy}
-            rows={8}
-            onChange={(event) => onChange({
-              ...editor,
-              prompt: event.target.value,
-              previewImageBase64: undefined,
-              previewContentType: undefined,
-              previewMetadata: undefined,
-            })}
-          />
-          {previewSrc ? (
-            <img
-              src={previewSrc}
-              alt="AI 生成预览"
-              style={{
-                width: "100%",
-                maxHeight: 520,
-                objectFit: "contain",
-                border: "1px solid var(--line)",
-                borderRadius: 10,
-              }}
+              })}
             />
-          ) : null}
+          </div>
+          <div className="form-row">
+            <label className="form-label">prompt</label>
+            <textarea
+              value={editor.prompt}
+              disabled={busy}
+              rows={5}
+              onChange={(event) => onChange({
+                ...editor,
+                prompt: event.target.value,
+                previewImageBase64: undefined,
+                previewContentType: undefined,
+                previewMetadata: undefined,
+              })}
+            />
+          </div>
+          <div className="image-generate-preview-slot">
+            {previewSrc ? (
+              <img src={previewSrc} alt="AI 生成预览" />
+            ) : (
+              <div className="empty">
+                {busy ? "生成中..." : "尚未生成预览，点击下方按钮开始"}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+        <div className="image-generate-footer">
           <button type="button" className="secondary compact-btn" disabled={busy} onClick={onClose}>
             取消
           </button>
           <button type="button" className="secondary compact-btn" disabled={busy} onClick={onGeneratePreview}>
-            {busy ? "生成中" : "生成预览"}
+            {busy ? "生成中" : previewSrc ? "重新生成预览" : "生成预览"}
           </button>
           <button type="button" className="approve-btn compact-btn" disabled={busy || !previewSrc} onClick={onInsert}>
             {busy ? "插入中" : "插入替换"}
@@ -1720,6 +1755,291 @@ function FieldTextarea({ label, value, onChange }: { label: string; value: strin
     <div style={{ marginTop: 8 }}>
       <label style={{ fontSize: 12, color: "var(--muted)" }}>{label}</label>
       <textarea value={value} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function formatRelativeTime(iso: string | undefined): string {
+  if (!iso) {
+    return "-";
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatElapsed(startedAt: string | undefined, finishedAt: string | undefined): string {
+  if (!startedAt) {
+    return "-";
+  }
+  const start = Date.parse(startedAt);
+  const end = finishedAt ? Date.parse(finishedAt) : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return "-";
+  }
+  const seconds = Math.max(0, Math.floor((end - start) / 1000));
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m > 0) {
+    return `${m}m ${s}s`;
+  }
+  return `${s}s`;
+}
+
+interface RegenerationProgressCardProps {
+  job: RegenerationJob;
+  detail: RegenerationJobDetail | null;
+  showLog: boolean;
+  onShowLog: () => void;
+  onCloseLog: () => void;
+  videoId: string;
+  version: string;
+}
+
+function RegenerationProgressCard({ job, detail, showLog, onShowLog, onCloseLog, videoId, version }: RegenerationProgressCardProps) {
+  const running = job.status === "running";
+  const currentStage = detail?.currentStage ?? null;
+  const logText = detail?.logText ?? "";
+  const hasSeparateTarget = Boolean(job.targetVersion && job.targetVersion !== version);
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12, display: "grid", gap: 8 }}>
+      <div className="row" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <span className={statusClass(job.status)}>job: {job.status}</span>
+        {hasSeparateTarget ? <span className="badge">新版本: {job.targetVersion}</span> : null}
+        {job.startFrom ? <span className="badge">from: {STAGE_LABELS[job.startFrom] ?? job.startFrom}</span> : null}
+        {currentStage && running ? <span className="badge in_review">阶段: {STAGE_LABELS[currentStage] ?? currentStage}</span> : null}
+        {job.pid ? <span className="badge">pid: {job.pid}</span> : null}
+        <span className="badge">耗时: {formatElapsed(job.startedAt, job.finishedAt)}</span>
+      </div>
+      <div style={{ color: "var(--muted)", fontSize: 12, wordBreak: "break-all" }}>
+        log: {job.logPath}
+      </div>
+      {running ? (
+        <div style={{ color: "var(--muted)", fontSize: 13 }}>
+          正在重生成… 每 3 秒刷新一次状态。
+        </div>
+      ) : null}
+      {job.error ? <div style={{ color: "var(--danger)" }}>{job.error}</div> : null}
+      <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Link href={`/tasks/${job.id}`} className="secondary compact-btn">
+          任务详情
+        </Link>
+        <button type="button" className="secondary compact-btn" onClick={onShowLog}>
+          查看日志
+        </button>
+      </div>
+      {showLog ? (
+        <RegenerationLogDrawer
+          title="重生成日志"
+          subtitle={job.logPath}
+          logText={logText}
+          onClose={onCloseLog}
+        />
+      ) : null}
+      {hasSeparateTarget ? (
+        <Link
+          href={`/projects/${videoId}/${job.targetVersion}/review`}
+          style={{ display: "inline-flex", color: "var(--accent)", fontSize: 13 }}
+        >
+          打开新版本
+        </Link>
+      ) : null}
+      {job.status === "succeeded" && job.targetVersion === version ? (
+        <div style={{ color: "var(--muted)", fontSize: 12 }}>
+          重生成完成，刷新页面查看新成片。
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface RegenerationHistoryListProps {
+  jobs: RegenerationJob[];
+  currentJobId: string | undefined;
+  videoId: string;
+  version: string;
+}
+
+function RegenerationLogDrawer({
+  title,
+  subtitle,
+  logText,
+  onClose,
+}: {
+  title: string;
+  subtitle: string;
+  logText: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="review-drawer-backdrop">
+      <aside className="review-drawer regeneration-log-drawer" role="dialog" aria-modal="true">
+        <div className="review-drawer-head">
+          <div>
+            <div className="section-title">{title}</div>
+            <div className="section-subtitle" style={{ wordBreak: "break-all" }}>{subtitle}</div>
+          </div>
+          <button type="button" className="secondary compact-btn" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        <div className="review-drawer-body">
+          <pre className="drawer-log">{logText || "（暂无日志输出）"}</pre>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function RegenerationHistoryList({ jobs, currentJobId, videoId, version }: RegenerationHistoryListProps) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [logCache, setLogCache] = useState<Record<string, RegenerationJobDetail>>({});
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const toggleHistory = async (jobId: string) => {
+    if (openId === jobId) {
+      setOpenId(null);
+      return;
+    }
+    setOpenId(jobId);
+    if (logCache[jobId]) {
+      return;
+    }
+    setLoadingId(jobId);
+    try {
+      const response = await fetch(`/api/projects/${videoId}/${version}/regenerate/${jobId}`, { cache: "no-store" });
+      const payload = (await response.json()) as RegenerationJobDetail | { error?: string };
+      if (response.ok && "job" in payload) {
+        setLogCache((prev) => ({ ...prev, [jobId]: payload }));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12, display: "grid", gap: 8 }}>
+      <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>历史记录（{jobs.length}）</div>
+          <div style={{ color: "var(--muted)", fontSize: 12 }}>
+            最近：{formatRelativeTime(jobs[0]?.startedAt)} · {jobs[0]?.status ?? "-"}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="secondary compact-btn"
+          style={{ marginLeft: "auto" }}
+          onClick={() => setDrawerOpen(true)}
+        >
+          查看历史
+        </button>
+      </div>
+      {drawerOpen ? (
+        <RegenerationHistoryDrawer
+          jobs={jobs}
+          currentJobId={currentJobId}
+          version={version}
+          openId={openId}
+          logCache={logCache}
+          loadingId={loadingId}
+          onToggleLog={toggleHistory}
+          onClose={() => setDrawerOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+interface RegenerationHistoryDrawerProps {
+  jobs: RegenerationJob[];
+  currentJobId: string | undefined;
+  version: string;
+  openId: string | null;
+  logCache: Record<string, RegenerationJobDetail>;
+  loadingId: string | null;
+  onToggleLog: (jobId: string) => void;
+  onClose: () => void;
+}
+
+function RegenerationHistoryDrawer({
+  jobs,
+  currentJobId,
+  version,
+  openId,
+  logCache,
+  loadingId,
+  onToggleLog,
+  onClose,
+}: RegenerationHistoryDrawerProps) {
+  return (
+    <div className="review-drawer-backdrop">
+      <aside className="review-drawer regeneration-history-drawer" role="dialog" aria-modal="true">
+        <div className="review-drawer-head">
+          <div>
+            <div className="section-title">重生成历史</div>
+            <div className="section-subtitle">共 {jobs.length} 条记录</div>
+          </div>
+          <button type="button" className="secondary compact-btn" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        <div className="review-drawer-body">
+          <div style={{ display: "grid", gap: 8 }}>
+            {jobs.map((job) => {
+              const isOpen = openId === job.id;
+              const isCurrent = job.id === currentJobId;
+              const hasSeparateTarget = Boolean(job.targetVersion && job.targetVersion !== version);
+              return (
+                <div key={job.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 10, fontSize: 12 }}>
+                  <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span className={statusClass(job.status)}>{job.status}</span>
+                    {isCurrent ? <span className="badge">本次</span> : null}
+                    {job.startFrom ? <span className="badge">from: {STAGE_LABELS[job.startFrom] ?? job.startFrom}</span> : null}
+                    {hasSeparateTarget ? <span className="badge">新版本: {job.targetVersion}</span> : null}
+                    <span style={{ color: "var(--muted)" }}>开始: {formatRelativeTime(job.startedAt)}</span>
+                    <span style={{ color: "var(--muted)" }}>耗时: {formatElapsed(job.startedAt, job.finishedAt)}</span>
+                  </div>
+                  <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                    <Link href={`/tasks/${job.id}`} className="secondary compact-btn">
+                      任务详情
+                    </Link>
+                    <button type="button" className="secondary compact-btn" onClick={() => onToggleLog(job.id)}>
+                      {isOpen ? "收起日志" : loadingId === job.id ? "加载..." : "查看日志"}
+                    </button>
+                  </div>
+                  {isOpen ? (
+                    <pre style={{
+                      marginTop: 8,
+                      maxHeight: 260,
+                      overflow: "auto",
+                      background: "#090d16",
+                      color: "#cdd6e3",
+                      padding: 10,
+                      borderRadius: 6,
+                      fontSize: 11,
+                      lineHeight: 1.4,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
+                    }}>
+                      {logCache[job.id]?.logText ?? "（暂无日志）"}
+                    </pre>
+                  ) : null}
+                  {isOpen && job.error ? (
+                    <div style={{ color: "var(--danger)", marginTop: 6, fontSize: 12 }}>{job.error}</div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }

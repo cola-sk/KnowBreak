@@ -57,6 +57,7 @@ def run_full(
     version: str | None = None,
     workflow_name: str = DEFAULT_WORKFLOW,
     topic: str | None = None,
+    video_id_override: str | None = None,
 ) -> tuple[str, str | None]:
     """全流程跑一个视频。返回 video_id。"""
     if version_mode == "create" and start_from is not None:
@@ -73,14 +74,17 @@ def run_full(
         else:
             cli_topic = topic
         resolved_topic = baked_topic or cli_topic
-        if not resolved_topic:
+        if not resolved_topic and not video_id_override:
             raise ValueError(
                 "topic_seed workflow 需要主题：在 workflow [capabilities.topic_seed].params.topic 里配置，"
-                "或通过 CLI --topic / source 前缀 'manual:' 传入"
+                "或通过 CLI --topic / source 前缀 'manual:' 传入，或用 --video-id 显式指定已存在的 video_id"
             )
         topic = resolved_topic
-        source = resolved_topic  # 用主题字符串生成稳定 video_id
-    video_id = video_id_from_source(source)
+        source = resolved_topic or source
+    if video_id_override:
+        video_id = video_id_override
+    else:
+        video_id = video_id_from_source(source)
     pdir, resolved_version = resolve_project_run_dir(cfg, video_id, version_mode, version)
     
     # Write project-specific overrides if provided via environment variables

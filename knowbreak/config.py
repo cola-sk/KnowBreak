@@ -84,10 +84,10 @@ class Config:
     pollinations_image_model: str | None = None
     cloudflare_account_id: str | None = None
     cloudflare_api_token: str | None = None
-    cloudflare_image_model: str = "@cf/bytedance/stable-diffusion-xl-lightning"
+    cloudflare_image_model: str = "@cf/black-forest-labs/flux-1-schnell"
     huggingface_api_token: str | None = None
-    huggingface_image_model: str = "stabilityai/stable-diffusion-xl-base-1.0"
-    huggingface_image_base_url: str = "https://api-inference.huggingface.co/models"
+    huggingface_image_model: str = "black-forest-labs/FLUX.1-schnell"
+    huggingface_image_base_url: str = "https://router.huggingface.co/hf-inference/models"
 
     @property
     def inputs_dir(self) -> Path:
@@ -214,17 +214,17 @@ def load_config() -> Config:
         or _optional_env("CLOUDFLARE_API_TOKEN"),
         cloudflare_image_model=_env(
             "KB_CLOUDFLARE_IMAGE_MODEL",
-            "@cf/bytedance/stable-diffusion-xl-lightning",
+            "@cf/black-forest-labs/flux-1-schnell",
         ),
         huggingface_api_token=_optional_env("KB_HUGGINGFACE_API_TOKEN")
         or _optional_env("HUGGINGFACE_API_TOKEN")
         or _optional_env("HF_TOKEN"),
         huggingface_image_model=_env(
             "KB_HUGGINGFACE_IMAGE_MODEL",
-            "stabilityai/stable-diffusion-xl-base-1.0",
+            "black-forest-labs/FLUX.1-schnell",
         ),
         huggingface_image_base_url=_env(
             "KB_HUGGINGFACE_IMAGE_BASE_URL",
-            "https://api-inference.huggingface.co/models",
+            "https://router.huggingface.co/hf-inference/models",
         ),
     )

@@ -47,6 +47,11 @@ def run(
         "--topic",
         help="手工主题字符串：仅 topic_seed 类 workflow 使用；主题绑定 workflow 会在 TOML 里烤死 topic，CLI 此处可省略",
     ),
+    video_id_override: str = typer.Option(
+        None,
+        "--video-id",
+        help="显式指定 video_id（覆盖 source 推导）；regenerate 等已知 video_id 的场景使用",
+    ),
 ):
     """全流程：一个视频跑到自动成片 MP4。"""
     cfg = load_config()
@@ -62,6 +67,7 @@ def run(
         version=version,
         workflow_name=workflow,
         topic=topic,
+        video_id_override=video_id_override,
     )
     console.print(f"\n[green]video_id[/] = {vid}")
     if resolved_version:

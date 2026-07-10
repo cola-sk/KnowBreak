@@ -122,6 +122,16 @@ function regenerationJobPath(videoId: string, version: string): string {
   return path.join(getVersionDir(videoId, version), "reviews", REGENERATION_JOB_FILE);
 }
 
+function regenerationJobPathForId(videoId: string, version: string, jobId: string): string {
+  return path.join(getVersionDir(videoId, version), "reviews", `regenerate_${jobId}.json`);
+}
+
+function regenerationJobLogPathForId(videoId: string, version: string, jobId: string): string {
+  return path.join(getVersionDir(videoId, version), "reviews", `regenerate_${jobId}.log`);
+}
+
+const JOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface VersionFlags {
   ignored: boolean;
   ignored_at?: string;
@@ -336,6 +346,7 @@ export interface ProductionReviewData {
   };
   reviews: Partial<Record<ReviewStage, ReviewFile>>;
   job: RegenerationJob | null;
+  regenerationJobs: RegenerationJob[];
   projectOverrides?: Record<string, any>;
 }
 
@@ -616,6 +627,7 @@ export async function getProductionReviewData(
     },
     reviews,
     job: await readRegenerationJob(videoId, version),
+    regenerationJobs: await listRegenerationJobs(videoId, version),
     projectOverrides,
   };
 }
@@ -713,13 +725,176 @@ export async function readRegenerationJob(
   return readJsonFile<RegenerationJob>(regenerationJobPath(videoId, version));
 }
 
+export async function readRegenerationJobForId(
+  videoId: string,
+  version: string,
+  jobId: string,
+): Promise<RegenerationJob | null> {
+  if (!JOB_ID_RE.test(jobId)) {
+    return null;
+  }
+  const fromJson = await readJsonFile<RegenerationJob>(regenerationJobPathForId(videoId, version, jobId));
+  if (fromJson) {
+    return fromJson;
+  }
+  return synthesizeJobFromLog(videoId, version, jobId);
+}
+
+export async function listRegenerationJobs(
+  videoId: string,
+  version: string,
+): Promise<RegenerationJob[]> {
+  const dir = path.join(getVersionDir(videoId, version), "reviews");
+  let entries: Array<import("node:fs").Dirent> = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const jsonJobs: Record<string, RegenerationJob> = {};
+  const logJobIds: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    let match = /^regenerate_([0-9a-f-]{36})\.json$/i.exec(entry.name);
+    if (match) {
+      const job = await readJsonFile<RegenerationJob>(path.join(dir, entry.name));
+      if (job) {
+        jsonJobs[job.id] = job;
+      }
+      continue;
+    }
+    match = /^regenerate_([0-9a-f-]{36})\.log$/i.exec(entry.name);
+    if (match) {
+      logJobIds.push(match[1]);
+    }
+  }
+
+  for (const jobId of logJobIds) {
+    if (jsonJobs[jobId]) {
+      continue;
+    }
+    const synthesized = await synthesizeJobFromLog(videoId, version, jobId, dir);
+    if (synthesized) {
+      jsonJobs[jobId] = synthesized;
+    }
+  }
+
+  return Object.values(jsonJobs).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+}
+
+async function synthesizeJobFromLog(
+  videoId: string,
+  version: string,
+  jobId: string,
+  dir?: string,
+): Promise<RegenerationJob | null> {
+  const reviewsDir = dir ?? path.join(getVersionDir(videoId, version), "reviews");
+  const logFile = path.join(reviewsDir, `regenerate_${jobId}.log`);
+  let raw: string;
+  let mtime: number;
+  try {
+    const stat = await fs.stat(logFile);
+    raw = await fs.readFile(logFile, "utf-8");
+    mtime = stat.mtimeMs;
+  } catch {
+    return null;
+  }
+  const finishMatch = /\[regenerate:(succeeded|failed)\]\s+(\S+)/.exec(raw);
+  const status = finishMatch ? (finishMatch[1] as RegenerationJob["status"]) : "running";
+  const finishedAt = finishMatch?.[2];
+  const commandLine = raw.split(/\r?\n/)[0]?.replace(/^\$\s*/, "");
+  const command = commandLine ? parseCommandString(commandLine) : [];
+  const errorLine = /(?:error|traceback|valueerror|filenotfounderror)[: ]([^\n]+)/i.exec(raw);
+  return {
+    id: jobId,
+    status,
+    mode: "update",
+    requestedFromVersion: version,
+    targetVersion: version,
+    workflow: "",
+    source: "",
+    command,
+    logPath: `${videoId}/${version}/reviews/regenerate_${jobId}.log`,
+    startedAt: new Date(mtime).toISOString(),
+    finishedAt,
+    error: status === "failed" ? (errorLine?.[1]?.slice(0, 200) ?? "regeneration failed") : undefined,
+  };
+}
+
+function parseCommandString(line: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    while (i < line.length && /\s/.test(line[i])) {
+      i += 1;
+    }
+    if (i >= line.length) {
+      break;
+    }
+    const ch = line[i];
+    if (ch === '"' || ch === "'") {
+      i += 1;
+      const start = i;
+      while (i < line.length && line[i] !== ch) {
+        i += 1;
+      }
+      tokens.push(line.slice(start, i));
+      i += 1;
+    } else {
+      const start = i;
+      while (i < line.length && !/\s/.test(line[i])) {
+        i += 1;
+      }
+      tokens.push(line.slice(start, i));
+    }
+  }
+  return tokens;
+}
+
 export async function writeRegenerationJob(
   videoId: string,
   version: string,
   job: RegenerationJob,
 ): Promise<RegenerationJob> {
   await writeJsonFile(regenerationJobPath(videoId, version), job);
+  await writeJsonFile(regenerationJobPathForId(videoId, version, job.id), job);
   return job;
+}
+
+export async function readRegenerationJobLogForId(
+  videoId: string,
+  version: string,
+  jobId: string,
+): Promise<{ text: string; updatedAt: string | null }> {
+  if (!JOB_ID_RE.test(jobId)) {
+    return { text: "", updatedAt: null };
+  }
+  const filePath = regenerationJobLogPathForId(videoId, version, jobId);
+  try {
+    const stat = await fs.stat(filePath);
+    const raw = await fs.readFile(filePath, "utf-8");
+    const text = stripAnsi(raw).split(/\r?\n/).slice(-200).join("\n");
+    return { text, updatedAt: stat.mtime.toISOString() };
+  } catch {
+    return { text: "", updatedAt: null };
+  }
+}
+
+function stripAnsi(text: string): string {
+  return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+export function parseRegenerationStage(logText: string): string | null {
+  const regex = /▸\s*阶段\s+\d+\/\d+\s+([A-Za-z0-9_-]+)/g;
+  let current: string | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(logText)) !== null) {
+    current = match[1];
+  }
+  return current;
 }
 
 export function resolveReviewRelativePath(filePath: string): string {
@@ -955,7 +1130,7 @@ async function listVersionSummaries(videoId: string, projectDir: string): Promis
     versions.push(await buildVersionSummary(videoId, child.name, versionDir));
   }
 
-  versions.sort((a, b) => b.version.localeCompare(a.version));
+  versions.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   return versions;
 }
 
@@ -975,16 +1150,41 @@ async function buildVersionSummary(videoId: string, version: string, versionDir:
   }
   const flags = await readJsonFile<VersionFlags>(versionFlagsPath(videoId, version));
 
-  const stats = await fs.stat(versionDir);
+  const updatedAt = await latestVersionUpdatedAt(versionDir);
   return {
     version,
     title: await inferVersionTitle(versionDir),
     doneStages,
     review: reviewStatuses,
-    updatedAt: stats.mtime.toISOString(),
+    updatedAt,
     ignored: Boolean(flags?.ignored),
     ignoredAt: flags?.ignored_at,
   };
+}
+
+async function latestVersionUpdatedAt(versionDir: string): Promise<string> {
+  let latest = 0;
+
+  async function include(filePath: string): Promise<void> {
+    try {
+      const stat = await fs.stat(filePath);
+      latest = Math.max(latest, stat.mtimeMs);
+    } catch {
+      // Missing optional artifacts do not affect ordering.
+    }
+  }
+
+  await include(versionDir);
+  await Promise.all([
+    ...Object.values(PIPELINE_ARTIFACTS).map((fileName) => include(path.join(versionDir, fileName))),
+    include(path.join(versionDir, "workflow_plan.json")),
+    include(path.join(versionDir, "project_profile_overrides.json")),
+    include(path.join(versionDir, "reviews", VERSION_FLAGS_FILE)),
+    ...Object.values(REVIEW_FILE).map((fileName) => include(path.join(versionDir, "reviews", fileName))),
+    include(path.join(versionDir, "reviews", REGENERATION_JOB_FILE)),
+  ]);
+
+  return new Date(latest || Date.now()).toISOString();
 }
 
 export async function listProjectSummaries(): Promise<ProjectSummary[]> {
@@ -992,6 +1192,7 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
   if (!existsSync(outDir)) {
     return [];
   }
+  const projectJobTimes = await latestJobStartedAtByProject(outDir);
 
   const entries = await fs.readdir(outDir, { withFileTypes: true });
   const projectDirs = entries.filter((entry) => entry.isDirectory());
@@ -1010,8 +1211,60 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
     projects.push({ videoId, title: versions[0]?.title ?? videoId, versions });
   }
 
-  projects.sort((a, b) => b.videoId.localeCompare(a.videoId));
+  projects.sort((a, b) => {
+    const aJobTime = projectJobTimes.get(a.videoId) ?? 0;
+    const bJobTime = projectJobTimes.get(b.videoId) ?? 0;
+    if (aJobTime || bJobTime) {
+      const diff = bJobTime - aJobTime;
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+    const aUpdated = Date.parse(a.versions[0]?.updatedAt ?? "") || 0;
+    const bUpdated = Date.parse(b.versions[0]?.updatedAt ?? "") || 0;
+    if (aUpdated || bUpdated) {
+      const diff = bUpdated - aUpdated;
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+    return b.videoId.localeCompare(a.videoId);
+  });
   return projects;
+}
+
+async function latestJobStartedAtByProject(outDir: string): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const dir = path.join(outDir, "_start_jobs");
+  let entries: Array<import("node:fs").Dirent> = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return result;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue;
+    }
+    const filePath = path.join(dir, entry.name);
+    let parsed: { videoId?: string | null; startedAt?: string } | null = null;
+    try {
+      parsed = JSON.parse(await fs.readFile(filePath, "utf-8"));
+    } catch {
+      continue;
+    }
+    if (!parsed?.videoId || !SAFE_SEGMENT_RE.test(parsed.videoId)) {
+      continue;
+    }
+    const startedAt = Date.parse(parsed.startedAt ?? "");
+    if (!startedAt || Number.isNaN(startedAt)) {
+      continue;
+    }
+    result.set(parsed.videoId, Math.max(result.get(parsed.videoId) ?? 0, startedAt));
+  }
+
+  return result;
 }
 
 export async function resolveAssetPath(segments: string[]): Promise<string | null> {

@@ -79,6 +79,33 @@ function stageLabel(stage: string): string {
   return labels[stage] ?? stage;
 }
 
+function shortJobId(id: string): string {
+  return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+function taskKindLabel(job: StartJob): string {
+  return job.taskType === "regenerate" ? "重生成" : "启动";
+}
+
+function taskTitle(job: StartJob): string {
+  if (job.taskType === "regenerate") {
+    const requested = job.requestedFromVersion ?? job.version ?? "-";
+    const target = job.targetVersion && job.targetVersion !== requested ? ` -> ${job.targetVersion}` : "";
+    return `重新生成 ${job.videoId ?? "-"} / ${requested}${target}`;
+  }
+  return job.input || job.source;
+}
+
+function taskStageText(job: TaskSummary): string {
+  if (job.currentStage) {
+    return `${stageLabel(job.currentStage)} (${job.currentStage})`;
+  }
+  if (job.startFrom) {
+    return `from ${stageLabel(job.startFrom)}`;
+  }
+  return "-";
+}
+
 function inlineReviewStage(stage: string | null | undefined): InlineReviewStage | null {
   if (stage === "script_review" || stage === "storyboard_review" || stage === "image_review") {
     return stage;
@@ -145,21 +172,23 @@ export function TasksListClient({ initialJobs }: TasksListClientProps) {
           {jobs.map((job) => (
             <Link href={`/tasks/${job.id}`} className="task-card" key={job.id}>
               <div className="task-card-head">
-                <div>
-                  <div className="task-title">{job.input || job.source}</div>
+                <div className="task-card-main">
+                  <div className="task-title-row">
+                    <span className="task-kind">{taskKindLabel(job)}</span>
+                    <div className="task-title">{taskTitle(job)}</div>
+                  </div>
                   <div className="task-meta">
-                    <code>{job.id}</code>
+                    <code>{shortJobId(job.id)}</code>
                     <span>{job.workflow}</span>
+                    <span>{formatTime(job.startedAt)}</span>
                   </div>
                 </div>
                 <span className={statusClass(job.status)}>{job.status}</span>
               </div>
-              <div className="task-meta-grid">
-                <span>开始：{formatTime(job.startedAt)}</span>
+              <div className="task-summary-row">
+                <span>阶段：{taskStageText(job)}</span>
+                <span>项目：{job.videoId ?? "-"} / {job.version ?? "-"}</span>
                 <span>结束：{formatTime(job.finishedAt)}</span>
-                <span>当前阶段：{job.currentStage ? `${stageLabel(job.currentStage)} (${job.currentStage})` : "-"}</span>
-                <span>video_id：{job.videoId ?? "-"}</span>
-                <span>version：{job.version ?? "-"}</span>
               </div>
               {job.error ? <div className="task-error">{job.error}</div> : null}
             </Link>
