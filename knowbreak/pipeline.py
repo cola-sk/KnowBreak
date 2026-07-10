@@ -82,6 +82,21 @@ def run_full(
         source = resolved_topic  # 用主题字符串生成稳定 video_id
     video_id = video_id_from_source(source)
     pdir, resolved_version = resolve_project_run_dir(cfg, video_id, version_mode, version)
+    
+    # Write project-specific overrides if provided via environment variables
+    import os
+    import json
+    env_overrides = os.getenv("KB_PROJECT_PROFILE_OVERRIDES")
+    if env_overrides:
+        try:
+            overrides = json.loads(env_overrides)
+            if overrides:
+                pdir.mkdir(parents=True, exist_ok=True)
+                with open(pdir / "project_profile_overrides.json", "w", encoding="utf-8") as f:
+                    json.dump(overrides, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            console.print(f"[red]警告: 写入 project_profile_overrides.json 失败: {e}[/]")
+
     source_cache_dir = project_dir(cfg.out_dir, video_id) if resolved_version else None
     write_workflow_plan(workflow, profile_name=cfg.profile.name, output_dir=pdir)
 

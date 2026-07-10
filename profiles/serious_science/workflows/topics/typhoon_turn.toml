@@ -1,0 +1,54 @@
+id = "typhoon_turn"
+description = "主题绑定 workflow：台风为什么经常变向。带有人工审核闸门（脚本/分镜/图片分别审核后再继续）。"
+
+steps = [
+  "topic_seed",
+  "script",
+  "script_review",
+  "storyboard",
+  "storyboard_review",
+  "images",
+  "image_review",
+  "tts",
+  "compose",
+]
+
+[capabilities.topic_seed]
+params = { topic = "台风为什么经常变向", hook = "为什么本该直奔陆地的台风，经常在海上走出秦王绕柱的S型走位？", angle = "从奇葩路径台风切入，通过通俗的力学与气象学原理解析台风移动机制，科普副热带高压、藤原效应、地形影响和秋台风多变原因，降低公众对气象预报的误解", target_duration = "120" }
+inputs = []
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/topics/typhoon_turn/script.md"
+inputs = ["topics.json"]
+outputs = ["scripts.json"]
+
+[capabilities.script_review]
+inputs = ["scripts.json"]
+outputs = ["reviews/script_review.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.storyboard_review]
+inputs = ["storyboards.json"]
+outputs = ["reviews/storyboard_review.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.image_review]
+inputs = ["images.json"]
+outputs = ["reviews/image_review.json"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

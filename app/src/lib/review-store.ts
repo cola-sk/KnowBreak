@@ -336,6 +336,7 @@ export interface ProductionReviewData {
   };
   reviews: Partial<Record<ReviewStage, ReviewFile>>;
   job: RegenerationJob | null;
+  projectOverrides?: Record<string, any>;
 }
 
 async function readArtifact(videoId: string, version: string, stage: ArtifactStage): Promise<unknown | null> {
@@ -346,7 +347,7 @@ async function readWorkflowPlan(versionDir: string): Promise<WorkflowPlan | null
   return readJsonFile<WorkflowPlan>(path.join(versionDir, "workflow_plan.json"));
 }
 
-function resolveProjectRoot(): string {
+export function resolveProjectRoot(): string {
   const candidates = [
     process.env.KB_PROJECT_ROOT,
     process.cwd(),
@@ -361,7 +362,7 @@ function resolveProjectRoot(): string {
   return path.resolve(process.cwd(), "..");
 }
 
-async function listTomlFiles(dir: string): Promise<string[]> {
+export async function listTomlFiles(dir: string): Promise<string[]> {
   const files: string[] = [];
   let entries: Array<import("node:fs").Dirent> = [];
   try {
@@ -383,9 +384,75 @@ async function listTomlFiles(dir: string): Promise<string[]> {
   return files;
 }
 
-function readWorkflowId(toml: string): string | null {
+export function readWorkflowId(toml: string): string | null {
   const match = /^id\s*=\s*"([^"]+)"/m.exec(toml);
   return match?.[1] ?? null;
+}
+
+export function readWorkflowDescription(toml: string): string | null {
+  const match = /^description\s*=\s*"((?:[^"\\]|\\.)*)"/m.exec(toml);
+  return match?.[1] ?? null;
+}
+
+export function readWorkflowSteps(toml: string): string[] {
+  const match = /^steps\s*=\s*\[([\s\S]*?)\]/m.exec(toml);
+  if (!match) {
+    return [];
+  }
+  const steps: string[] = [];
+  const regex = /"((?:[^"\\]|\\.)*)"/g;
+  let item: RegExpExecArray | null;
+  while ((item = regex.exec(match[1])) !== null) {
+    steps.push(item[1]);
+  }
+  return steps;
+}
+
+export interface WorkflowSummary {
+  id: string;
+  description: string | null;
+  path: string;
+  steps: string[];
+  inputMode: "video" | "topic";
+  isCustom: boolean;
+  isTopic: boolean;
+  isEditable: boolean;
+}
+
+export async function listWorkflows(
+  profileName = "serious_science",
+): Promise<WorkflowSummary[]> {
+  const workflowsDir = path.join(resolveProjectRoot(), "profiles", profileName, "workflows");
+  const files = await listTomlFiles(workflowsDir);
+  const summaries: WorkflowSummary[] = [];
+  for (const file of files) {
+    const text = await fs.readFile(file, "utf-8");
+    const id = readWorkflowId(text);
+    if (!id) {
+      continue;
+    }
+    const workflowPath = path.relative(workflowsDir, file).replace(/\.toml$/, "").split(path.sep).join("/");
+    const isCustom = workflowPath.startsWith("custom/");
+    const isTopic = workflowPath.startsWith("topics/");
+    const steps = readWorkflowSteps(text);
+    summaries.push({
+      id,
+      description: readWorkflowDescription(text),
+      path: workflowPath,
+      steps,
+      inputMode: steps.includes("asr") ? "video" : "topic",
+      isCustom,
+      isTopic,
+      isEditable: true,
+    });
+  }
+  return summaries.sort((a, b) => {
+    const order = (item: WorkflowSummary) => item.isTopic ? 1 : item.isCustom ? 2 : 0;
+    if (order(a) !== order(b)) {
+      return order(a) - order(b);
+    }
+    return a.path.localeCompare(b.path);
+  });
 }
 
 export async function resolveWorkflowCliName(
@@ -527,6 +594,8 @@ export async function getProductionReviewData(
     }
   }
 
+  const projectOverrides = (await readJsonFile<Record<string, any>>(path.join(versionDir, "project_profile_overrides.json"))) || {};
+
   return {
     videoId,
     version,
@@ -547,6 +616,7 @@ export async function getProductionReviewData(
     },
     reviews,
     job: await readRegenerationJob(videoId, version),
+    projectOverrides,
   };
 }
 

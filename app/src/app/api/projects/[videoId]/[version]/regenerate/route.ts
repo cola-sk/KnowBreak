@@ -45,6 +45,7 @@ interface RegenerateRequest {
   targetVersion?: string;
   workflow?: string;
   source?: string;
+  projectOverrides?: Record<string, any>;
 }
 
 function resolveProjectRoot(): string {
@@ -254,6 +255,19 @@ export async function POST(
       }
     }
 
+    // Save project profile overrides if provided and the folder exists
+    if (body.projectOverrides) {
+      const activeDir = getVersionDir(videoId, jobVersion);
+      if (existsSync(activeDir)) {
+        await fs.mkdir(activeDir, { recursive: true });
+        await fs.writeFile(
+          path.join(activeDir, "project_profile_overrides.json"),
+          JSON.stringify(body.projectOverrides, null, 2),
+          "utf-8"
+        );
+      }
+    }
+
     const args = [
       "run",
       "knowbreak",
@@ -301,6 +315,7 @@ export async function POST(
       env: {
         ...process.env,
         KB_REVIEW_AUTO_APPROVE: "1",
+        ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

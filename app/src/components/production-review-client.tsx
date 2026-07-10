@@ -88,6 +88,7 @@ export interface ProductionReviewPayload {
   };
   reviews: Partial<Record<ReviewStage, ReviewFile>>;
   job: RegenerationJob | null;
+  projectOverrides?: Record<string, any>;
 }
 
 interface Props {
@@ -206,6 +207,21 @@ export function ProductionReviewClient({ initial }: Props) {
   const [targetVersion, setTargetVersion] = useState("");
   const [source, setSource] = useState(initial.source);
   const [workflow, setWorkflow] = useState(initial.workflow);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => new Date().toISOString());
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Project overrides state
+  const [projectOverrides, setProjectOverrides] = useState<Record<string, any>>(() => initial.projectOverrides ?? {});
+  const [showConfig, setShowConfig] = useState(false);
+  const [aspectRatioPreset, setAspectRatioPreset] = useState(() => {
+    const w = initial.projectOverrides?.compose?.video_w;
+    const h = initial.projectOverrides?.compose?.video_h;
+    if (w === 1080 && h === 1920) return "vertical";
+    if (w === 1920 && h === 1080) return "horizontal";
+    if (w === 1080 && h === 1080) return "square";
+    if (w || h) return "custom";
+    return "inherit";
+  });
 
   const selectedVideo = useMemo(() => {
     return data.videos.find((video) => video.topic_index === topicIndex) ?? data.videos[0] ?? null;
@@ -225,6 +241,40 @@ export function ProductionReviewClient({ initial }: Props) {
 
   const stageOptions = useMemo(() => uniqueStageOptions(data.workflowSteps), [data.workflowSteps]);
   const imageToken = data.reviews.image_review?.updated_at ?? data.job?.finishedAt ?? data.version;
+  const workflowStageProgress = useMemo(() => {
+    const artifactDone: Record<string, boolean> = {
+      script: Boolean(data.artifacts.script),
+      storyboard: Boolean(data.artifacts.storyboard),
+      images: Boolean(data.artifacts.images),
+      compose: Boolean(data.artifacts.compose),
+      tts: Boolean(data.videos.length > 0 || data.artifacts.compose),
+    };
+    const steps = data.workflowSteps.filter((step) => !step.endsWith("_review"));
+    const lastDoneIndex = steps.reduce((max, step, index) => artifactDone[step] ? Math.max(max, index) : max, -1);
+    return steps.map((step, index) => ({
+      stage: step,
+      done: index <= lastDoneIndex || Boolean(artifactDone[step]),
+    }));
+  }, [data]);
+
+  const refreshData = async () => {
+    setRefreshing(true);
+    try {
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/review`, { cache: "no-store" });
+      const payload = (await response.json()) as ProductionReviewPayload | { error?: string };
+      if (!response.ok || !("videoId" in payload)) {
+        throw new Error("error" in payload ? payload.error ?? "刷新失败" : "刷新失败");
+      }
+      setData(payload);
+      setSource(payload.source);
+      setWorkflow(payload.workflow);
+      setLastRefreshedAt(new Date().toISOString());
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "刷新失败");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const closeEditor = () => {
     setEditor((prev) => {
@@ -298,6 +348,16 @@ export function ProductionReviewClient({ initial }: Props) {
       }
     };
   }, [editor]);
+
+  useEffect(() => {
+    if (data.job?.status !== "running") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshData();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [data.job?.status, data.videoId, data.version]);
 
   const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
     setData((prev) => {
@@ -512,6 +572,7 @@ export function ProductionReviewClient({ initial }: Props) {
           targetVersion: targetVersion.trim() || undefined,
           source,
           workflow,
+          projectOverrides: Object.keys(projectOverrides).length > 0 ? projectOverrides : undefined,
         }),
       });
       const payload = (await response.json()) as { job?: RegenerationJob; error?: string };
@@ -542,6 +603,9 @@ export function ProductionReviewClient({ initial }: Props) {
               </div>
             </div>
             <div className="row">
+              <button type="button" className="btn secondary-btn compact-btn" onClick={refreshData} disabled={refreshing || saving}>
+                {refreshing ? "刷新中" : "刷新状态"}
+              </button>
               {Object.entries(data.reviews).map(([stage, review]) => (
                 <span key={stage} className={statusClass(review?.status)}>
                   {stage}: {review?.status}
@@ -549,6 +613,19 @@ export function ProductionReviewClient({ initial }: Props) {
               ))}
             </div>
           </div>
+          <div className="section-subtitle" style={{ marginTop: 8 }}>
+            状态更新于 {new Date(lastRefreshedAt).toLocaleTimeString()}
+          </div>
+
+          {workflowStageProgress.length > 0 ? (
+            <div className="compact-stage-strip">
+              {workflowStageProgress.map((item) => (
+                <span key={item.stage} className={`compact-stage ${item.done ? "done" : ""}`}>
+                  {STAGE_LABELS[item.stage] ?? item.stage}
+                </span>
+              ))}
+            </div>
+          ) : null}
 
           {data.videos.length > 1 ? (
             <div style={{ marginTop: 12 }}>
@@ -626,6 +703,210 @@ export function ProductionReviewClient({ initial }: Props) {
                 <input value={targetVersion} onChange={(event) => setTargetVersion(event.target.value)} />
               </div>
             ) : null}
+
+            {/* Project specific overrides in regeneration form */}
+            <div style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn secondary-btn"
+                onClick={() => setShowConfig(!showConfig)}
+                style={{ width: "100%", justifyContent: "space-between", fontSize: 12, padding: "8px 12px" }}
+              >
+                <span>⚙️ 自定义项目专属参数 {Object.keys(projectOverrides).length > 0 ? `(${Object.keys(projectOverrides).length} 项修改)` : ""}</span>
+                <span>{showConfig ? "收起" : "展开"}</span>
+              </button>
+              
+              {showConfig && (
+                <div style={{ marginTop: 10, display: "grid", gap: 10, fontSize: 13, borderLeft: "2px solid var(--accent)", paddingLeft: 10 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--muted)" }}>视频品牌水印</label>
+                    <input
+                      type="text"
+                      placeholder="继承全局默认"
+                      value={projectOverrides.compose?.brand || ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProjectOverrides(prev => {
+                          const next = structuredClone(prev);
+                          if (!next.compose) next.compose = {};
+                          if (val) next.compose.brand = val;
+                          else delete next.compose.brand;
+                          return next;
+                        });
+                      }}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--muted)" }}>视频比例 / 尺寸</label>
+                    <select
+                      value={aspectRatioPreset}
+                      onChange={(e) => {
+                        const preset = e.target.value;
+                        setAspectRatioPreset(preset);
+                        setProjectOverrides(prev => {
+                          const next = structuredClone(prev);
+                          if (!next.compose) next.compose = {};
+                          if (preset === "vertical") {
+                            next.compose.video_w = 1080;
+                            next.compose.video_h = 1920;
+                          } else if (preset === "horizontal") {
+                            next.compose.video_w = 1920;
+                            next.compose.video_h = 1080;
+                          } else if (preset === "square") {
+                            next.compose.video_w = 1080;
+                            next.compose.video_h = 1080;
+                          } else {
+                            delete next.compose.video_w;
+                            delete next.compose.video_h;
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      <option value="inherit">继承全局默认比例</option>
+                      <option value="vertical">📱 竖屏 9:16 (1080x1920)</option>
+                      <option value="horizontal">💻 横屏 16:9 (1920x1080)</option>
+                      <option value="square">⏹️ 方形 1:1 (1080x1080)</option>
+                      <option value="custom">🛠️ 自定义尺寸</option>
+                    </select>
+                  </div>
+
+                  {aspectRatioPreset === "custom" && (
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: 11, color: "var(--muted)" }}>宽</label>
+                        <input
+                          type="number"
+                          placeholder="宽度"
+                          value={projectOverrides.compose?.video_w || ""}
+                          onChange={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : "";
+                            setProjectOverrides(prev => {
+                              const next = structuredClone(prev);
+                              if (!next.compose) next.compose = {};
+                              if (val) next.compose.video_w = val;
+                              else delete next.compose.video_w;
+                              return next;
+                            });
+                          }}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: 11, color: "var(--muted)" }}>高</label>
+                        <input
+                          type="number"
+                          placeholder="高度"
+                          value={projectOverrides.compose?.video_h || ""}
+                          onChange={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : "";
+                            setProjectOverrides(prev => {
+                              const next = structuredClone(prev);
+                              if (!next.compose) next.compose = {};
+                              if (val) next.compose.video_h = val;
+                              else delete next.compose.video_h;
+                              return next;
+                            });
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--muted)" }}>单选题最短时长(秒)</label>
+                    <input
+                      type="number"
+                      placeholder="继承全局默认"
+                      value={projectOverrides.topics?.target_duration_min || ""}
+                      onChange={(e) => {
+                        const val = e.target.value ? Number(e.target.value) : "";
+                        setProjectOverrides(prev => {
+                          const next = structuredClone(prev);
+                          if (!next.topics) next.topics = {};
+                          if (val) next.topics.target_duration_min = val;
+                          else delete next.topics.target_duration_min;
+                          return next;
+                        });
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--muted)" }}>单选题最长时长(秒)</label>
+                    <input
+                      type="number"
+                      placeholder="继承全局默认"
+                      value={projectOverrides.topics?.target_duration_max || ""}
+                      onChange={(e) => {
+                        const val = e.target.value ? Number(e.target.value) : "";
+                        setProjectOverrides(prev => {
+                          const next = structuredClone(prev);
+                          if (!next.topics) next.topics = {};
+                          if (val) next.topics.target_duration_max = val;
+                          else delete next.topics.target_duration_max;
+                          return next;
+                        });
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--muted)" }}>底部进度条</label>
+                    <select
+                      value={
+                        projectOverrides.compose?.progress_bar_enabled === undefined
+                          ? "inherit"
+                          : projectOverrides.compose?.progress_bar_enabled
+                            ? "true"
+                            : "false"
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProjectOverrides(prev => {
+                          const next = structuredClone(prev);
+                          if (!next.compose) next.compose = {};
+                          if (val === "inherit") delete next.compose.progress_bar_enabled;
+                          else next.compose.progress_bar_enabled = val === "true";
+                          return next;
+                        });
+                      }}
+                    >
+                      <option value="inherit">继承全局默认</option>
+                      <option value="true">启用进度条</option>
+                      <option value="false">禁用进度条</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--muted)" }}>片头启用</label>
+                    <select
+                      value={
+                        projectOverrides.intro?.enabled === undefined
+                          ? "inherit"
+                          : projectOverrides.intro?.enabled
+                            ? "true"
+                            : "false"
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProjectOverrides(prev => {
+                          const next = structuredClone(prev);
+                          if (!next.intro) next.intro = {};
+                          if (val === "inherit") delete next.intro.enabled;
+                          else next.intro.enabled = val === "true";
+                          return next;
+                        });
+                      }}
+                    >
+                      <option value="inherit">继承全局默认</option>
+                      <option value="true">启用片头</option>
+                      <option value="false">禁用片头</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="row">
               <button className="warn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
                 {saving || regenerating ? "处理中..." : "保存并重生成"}

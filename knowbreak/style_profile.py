@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tomllib
 from pathlib import Path
 
@@ -131,9 +132,72 @@ def load_style_profile(project_root: Path, profile_name: str, profile_path: str 
         raise ValueError(f"不支持的风格 profile 格式: {path}")
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     _expand_prompt_files(data, path.parent)
+    _apply_json_overrides(data, path.parent)
+    _apply_project_overrides(data)
     profile = StyleProfile.model_validate(data)
     profile._base_dir = path.parent
     return profile
+
+
+def _apply_project_overrides(data: dict) -> None:
+    """Apply project-specific style overrides from environment variables or project files."""
+    import os
+    import sys
+
+    # 1. Apply overrides from environment variable (passed during process spawn)
+    env_overrides = os.getenv("KB_PROJECT_PROFILE_OVERRIDES")
+    if env_overrides:
+        try:
+            overrides = json.loads(env_overrides)
+            if isinstance(overrides, dict):
+                _deep_merge(data, overrides)
+        except Exception:
+            pass
+
+    # 2. Search sys.argv to find project_profile_overrides.json in any directory arguments
+    for arg in sys.argv:
+        try:
+            p = Path(arg)
+            p_abs = p.resolve()
+            curr = p_abs
+            # Traverse upwards to find project_profile_overrides.json
+            for _ in range(5):
+                if not curr or curr == curr.parent:
+                    break
+                overrides_file = curr / "project_profile_overrides.json"
+                if overrides_file.is_file():
+                    try:
+                        project_overrides = json.loads(overrides_file.read_text(encoding="utf-8"))
+                        if isinstance(project_overrides, dict):
+                            _deep_merge(data, project_overrides)
+                        break
+                    except Exception:
+                        pass
+                curr = curr.parent
+        except Exception:
+            pass
+
+
+def _apply_json_overrides(data: dict, base_dir: Path) -> None:
+    """Deep-merge profile_overrides.json over the in-memory TOML data dict."""
+    overrides_path = base_dir / "profile_overrides.json"
+    if not overrides_path.exists():
+        return
+    try:
+        overrides = json.loads(overrides_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(overrides, dict):
+        return
+    _deep_merge(data, overrides)
+
+
+def _deep_merge(base: dict, override: dict) -> None:
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
 
 
 def _resolve_profile_path(project_root: Path, profile_name: str, profile_path: str | None) -> Path:

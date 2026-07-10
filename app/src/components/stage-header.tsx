@@ -66,9 +66,17 @@ export function StageHeader({ videoId, version, title, active, reviewStatuses }:
             version: {version} · id: {videoId}
           </div>
         </div>
-        <Link href="/" className="badge">
-          返回项目列表
-        </Link>
+        <div className="row" style={{ gap: 8 }}>
+          <Link href="/projects" className="badge">
+            返回项目列表
+          </Link>
+          <Link href="/settings" className="badge">
+            参数设置
+          </Link>
+          <Link href="/" className="badge">
+            首页
+          </Link>
+        </div>
       </div>
       <div className="row" style={{ marginTop: 12, gap: 8 }}>
         {stages.map((stage) => {

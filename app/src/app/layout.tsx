@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { NavigationHeader } from "@/components/navigation-header";
 
 import "./globals.css";
 
@@ -14,7 +15,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <NavigationHeader />
+        {children}
+      </body>
     </html>
   );
 }
+
