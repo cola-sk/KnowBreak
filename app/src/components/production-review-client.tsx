@@ -259,6 +259,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
   const [refreshing, setRefreshing] = useState(false);
   const [activeJobDetail, setActiveJobDetail] = useState<RegenerationJobDetail | null>(null);
   const [showJobLog, setShowJobLog] = useState(false);
+  const [jobNotice, setJobNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
+  const previousJobRef = useRef<{ id: string; status: RegenerationJob["status"] } | null>(null);
 
   // Project overrides state
   const [projectOverrides, setProjectOverrides] = useState<Record<string, any>>(() => initial.projectOverrides ?? {});
@@ -437,6 +439,42 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     }, 5000);
     return () => window.clearInterval(timer);
   }, [data.job?.status, data.videoId, data.version]);
+
+  useEffect(() => {
+    const currentJob = data.job;
+    const current = data.job ? { id: data.job.id, status: data.job.status } : null;
+    const previous = previousJobRef.current;
+
+    if (current?.status === "running" && (!previous || previous.id !== current.id)) {
+      setJobNotice(null);
+    }
+
+    if (
+      previous
+      && current
+      && previous.id === current.id
+      && previous.status === "running"
+      && current.status !== "running"
+      && currentJob
+    ) {
+      if (current.status === "succeeded") {
+        const hasSeparateTarget = Boolean(currentJob.targetVersion && currentJob.targetVersion !== data.version);
+        setJobNotice({
+          tone: "success",
+          text: hasSeparateTarget
+            ? `重生成已完成，已生成新版本 ${currentJob.targetVersion}。`
+            : "重生成已完成，当前版本已更新。",
+        });
+      } else {
+        setJobNotice({
+          tone: "danger",
+          text: currentJob.error ? `重生成失败：${currentJob.error}` : "重生成失败，请查看任务详情或日志。",
+        });
+      }
+    }
+
+    previousJobRef.current = current;
+  }, [data.job, data.version]);
 
   const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
     setData((prev) => {
@@ -768,6 +806,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     if (saveBeforeRun) {
       setSaving(true);
     }
+    setShowJobLog(false);
+    setJobNotice(null);
     setMessage("");
     try {
       if (saveBeforeRun) {
@@ -794,7 +834,6 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
         job: payload.job!,
         regenerationJobs: [payload.job!, ...prev.regenerationJobs],
       }));
-      setShowJobLog(true);
       setMessage(saveBeforeRun
         ? "已保存修改，并启动重生成任务；下方可查看实时进度。"
         : "重生成任务已启动；下方可查看实时进度。");
@@ -933,7 +972,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
               <div className="section-subtitle">随本次重生成请求保存为项目级覆盖，不影响全局设置。</div>
             </div>
             <div className="row">
-              <button className="warn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
+              <button className="primary-btn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
                 {saving || regenerating ? "处理中..." : "保存表单修改并重生成 MP4"}
               </button>
               <button className="secondary" disabled={saving || regenerating} onClick={() => regenerate(false)}>
@@ -963,6 +1002,11 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
             />
           ) : null}
 
+          {jobNotice ? (
+            <div className={`notice ${jobNotice.tone}`} style={{ marginTop: 12 }}>
+              {jobNotice.text}
+            </div>
+          ) : null}
           {message ? <div style={{ marginTop: 12, color: "var(--muted)" }}>{message}</div> : null}
         </section>
       </div>
