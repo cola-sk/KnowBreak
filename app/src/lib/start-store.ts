@@ -240,11 +240,10 @@ async function buildStageProgress(job: StartJob, currentStage: string | null): P
     const artifact = STAGE_ARTIFACT[stage];
     const artifactExists = artifact ? await artifactExistsForJob(job, artifact) : false;
     let status: JobStageProgress["status"] = "pending";
-    if (artifactExists || job.status === "succeeded" || (currentIndex >= 0 && index < currentIndex)) {
-      status = "done";
-    }
-    if (job.status === "running" && currentStage === stage && !artifactExists) {
+    if (job.status === "running" && currentStage === stage) {
       status = "running";
+    } else if (artifactExists || job.status === "succeeded" || (currentIndex >= 0 && index < currentIndex)) {
+      status = "done";
     }
     if (job.status === "failed" && currentStage === stage) {
       status = "failed";

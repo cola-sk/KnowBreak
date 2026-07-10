@@ -113,6 +113,7 @@ interface GenerateEditorState {
   title: string;
   prompt: string;
   provider: string;
+  model: string;
   previewImageBase64?: string;
   previewContentType?: string;
   previewMetadata?: GeneratedImageMetadata;
@@ -149,6 +150,16 @@ const VIEWPORT_SIZE: Size = {
   width: 360,
   height: 640,
 };
+
+const IMAGE_PROVIDER_OPTIONS = [
+  { value: "pollinations", label: "Pollinations", defaultModel: "" },
+  { value: "cloudflare_workers", label: "Cloudflare Workers AI", defaultModel: "@cf/bytedance/stable-diffusion-xl-lightning" },
+  { value: "huggingface", label: "Hugging Face", defaultModel: "stabilityai/stable-diffusion-xl-base-1.0" },
+];
+
+function defaultModelForProvider(provider: string): string {
+  return IMAGE_PROVIDER_OPTIONS.find((option) => option.value === provider)?.defaultModel ?? "";
+}
 
 const STAGE_LABELS: Record<string, string> = {
   start: "从头开始",
@@ -319,6 +330,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
       title,
       prompt,
       provider: "pollinations",
+      model: defaultModelForProvider("pollinations"),
     });
     setMessage("");
   };
@@ -645,6 +657,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
         body: JSON.stringify({
           action: "preview",
           provider: generateEditor.provider,
+          model: generateEditor.model || undefined,
           prompt,
         }),
       });
@@ -1366,10 +1379,37 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
           <select
             value={editor.provider}
             disabled={busy}
-            onChange={(event) => onChange({ ...editor, provider: event.target.value })}
+            onChange={(event) => {
+              const provider = event.target.value;
+              onChange({
+                ...editor,
+                provider,
+                model: defaultModelForProvider(provider),
+                previewImageBase64: undefined,
+                previewContentType: undefined,
+                previewMetadata: undefined,
+              });
+            }}
           >
-            <option value="pollinations">pollinations</option>
+            {IMAGE_PROVIDER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>model</label>
+          <input
+            value={editor.model}
+            disabled={busy}
+            placeholder="使用 provider 默认模型"
+            onChange={(event) => onChange({
+              ...editor,
+              model: event.target.value,
+              previewImageBase64: undefined,
+              previewContentType: undefined,
+              previewMetadata: undefined,
+            })}
+          />
           <label style={{ fontSize: 12, color: "var(--muted)" }}>prompt</label>
           <textarea
             value={editor.prompt}

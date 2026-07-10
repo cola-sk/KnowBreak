@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { ImageReviewClient, type ImageReviewContext, type ImageReviewPayload } from "@/components/image-review-client";
+import { ScriptReviewClient, type ScriptReviewPayload } from "@/components/script-review-client";
+import { StoryboardReviewClient, type StoryboardReviewPayload } from "@/components/storyboard-review-client";
 import type { JobStageProgress, StartJob, StartJobDetail } from "@/lib/start-store";
 
 interface TasksPayload {
@@ -16,6 +19,16 @@ interface TasksListClientProps {
 
 interface TaskDetailClientProps {
   initial: StartJobDetail;
+}
+
+type InlineReviewStage = "script_review" | "storyboard_review" | "image_review";
+
+interface ReviewDrawerState {
+  stage: InlineReviewStage;
+  loading: boolean;
+  error: string | null;
+  payload: ScriptReviewPayload | StoryboardReviewPayload | ImageReviewPayload | null;
+  context?: ImageReviewContext;
 }
 
 type TaskSummary = StartJob & {
@@ -64,6 +77,23 @@ function stageLabel(stage: string): string {
     compose: "合成",
   };
   return labels[stage] ?? stage;
+}
+
+function inlineReviewStage(stage: string | null | undefined): InlineReviewStage | null {
+  if (stage === "script_review" || stage === "storyboard_review" || stage === "image_review") {
+    return stage;
+  }
+  return null;
+}
+
+function artifactStageForReview(stage: InlineReviewStage): "script" | "storyboard" | "images" {
+  if (stage === "script_review") {
+    return "script";
+  }
+  if (stage === "storyboard_review") {
+    return "storyboard";
+  }
+  return "images";
 }
 
 export function TasksListClient({ initialJobs }: TasksListClientProps) {
@@ -147,6 +177,7 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<"cancel" | "delete" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reviewDrawer, setReviewDrawer] = useState<ReviewDrawerState | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -207,10 +238,69 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
     }
   };
 
+  const openInlineReview = async (stage: InlineReviewStage) => {
+    if (!detail.job.videoId || !detail.job.version) {
+      setActionError("当前任务还没有解析出 video_id/version，暂时不能打开审核。");
+      return;
+    }
+    setReviewDrawer({
+      stage,
+      loading: true,
+      error: null,
+      payload: null,
+    });
+    try {
+      const artifactStage = artifactStageForReview(stage);
+      const response = await fetch(
+        `/api/projects/${detail.job.videoId}/${detail.job.version}/${artifactStage}`,
+        { cache: "no-store" },
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "加载审核数据失败");
+      }
+
+      let context: ImageReviewContext | undefined;
+      if (stage === "image_review") {
+        const [scriptResponse, storyboardResponse] = await Promise.allSettled([
+          fetch(`/api/projects/${detail.job.videoId}/${detail.job.version}/script`, { cache: "no-store" }),
+          fetch(`/api/projects/${detail.job.videoId}/${detail.job.version}/storyboard`, { cache: "no-store" }),
+        ]);
+        const scriptPayload = scriptResponse.status === "fulfilled" && scriptResponse.value.ok
+          ? await scriptResponse.value.json()
+          : null;
+        const storyboardPayload = storyboardResponse.status === "fulfilled" && storyboardResponse.value.ok
+          ? await storyboardResponse.value.json()
+          : null;
+        context = {
+          script: scriptPayload?.artifact ?? null,
+          storyboard: storyboardPayload?.artifact ?? null,
+        };
+      }
+
+      setReviewDrawer({
+        stage,
+        loading: false,
+        error: null,
+        payload,
+        context,
+      });
+    } catch (error) {
+      setReviewDrawer({
+        stage,
+        loading: false,
+        error: error instanceof Error ? error.message : "加载审核数据失败",
+        payload: null,
+      });
+    }
+  };
+
   useEffect(() => {
     const timer = window.setInterval(refresh, detail.job.status === "running" ? 2000 : 8000);
     return () => window.clearInterval(timer);
   }, [detail.job.id, detail.job.status]);
+
+  const activeReviewStage = inlineReviewStage(detail.currentStage);
 
   return (
     <div className="task-page-stack">
@@ -252,6 +342,23 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
             </Link>
           ) : null}
         </div>
+        {activeReviewStage && detail.job.status === "running" ? (
+          <div className="task-review-callout">
+            <div>
+              <div className="section-title">当前进入审核阶段</div>
+              <div className="section-subtitle">
+                {stageLabel(activeReviewStage)} 正在等待通过；可以在当前页面打开审核抽屉，任务会在审核通过后继续执行。
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn primary-btn compact-btn"
+              onClick={() => openInlineReview(activeReviewStage)}
+            >
+              进入审核
+            </button>
+          </div>
+        ) : null}
         {actionError ? <div className="task-error">{actionError}</div> : null}
         {detail.job.error ? <div className="task-error">{detail.job.error}</div> : null}
       </section>
@@ -260,7 +367,18 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
         <div className="section-title">阶段进度</div>
         <div className="stage-progress-list">
           {detail.stages.map((stage) => (
-            <StageProgressRow key={`${stage.index}-${stage.stage}`} stage={stage} current={detail.currentStage === stage.stage} />
+            <StageProgressRow
+              key={`${stage.index}-${stage.stage}`}
+              stage={stage}
+              current={detail.currentStage === stage.stage}
+              canReview={Boolean(
+                inlineReviewStage(stage.stage)
+                && detail.job.videoId
+                && detail.job.version
+                && (detail.currentStage === stage.stage || stage.artifactExists),
+              )}
+              onReview={(reviewStage) => openInlineReview(reviewStage)}
+            />
           ))}
         </div>
       </section>
@@ -275,11 +393,31 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
         </div>
         <pre className="task-log">{detail.logText || "暂无日志内容。"}</pre>
       </section>
+
+      {reviewDrawer ? (
+        <InlineReviewDrawer
+          videoId={detail.job.videoId ?? ""}
+          version={detail.job.version ?? ""}
+          state={reviewDrawer}
+          onClose={() => setReviewDrawer(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function StageProgressRow({ stage, current }: { stage: JobStageProgress; current: boolean }) {
+function StageProgressRow({
+  stage,
+  current,
+  canReview,
+  onReview,
+}: {
+  stage: JobStageProgress;
+  current: boolean;
+  canReview: boolean;
+  onReview: (stage: InlineReviewStage) => void;
+}) {
+  const reviewStage = inlineReviewStage(stage.stage);
   return (
     <div className={`stage-progress-row ${current ? "current" : ""}`}>
       <div className="stage-progress-index">{stage.index + 1}</div>
@@ -291,7 +429,66 @@ function StageProgressRow({ stage, current }: { stage: JobStageProgress; current
           {stage.artifact ? `${stage.artifact}${stage.artifactExists ? " 已生成" : " 未生成"}` : "无产物文件"}
         </div>
       </div>
-      <span className={statusClass(stage.status)}>{stage.status}</span>
+      <div className="row" style={{ alignItems: "center" }}>
+        {reviewStage && canReview ? (
+          <button type="button" className="btn secondary-btn compact-btn" onClick={() => onReview(reviewStage)}>
+            进入审核
+          </button>
+        ) : null}
+        <span className={statusClass(stage.status)}>{stage.status}</span>
+      </div>
+    </div>
+  );
+}
+
+function InlineReviewDrawer({
+  videoId,
+  version,
+  state,
+  onClose,
+}: {
+  videoId: string;
+  version: string;
+  state: ReviewDrawerState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="review-drawer-backdrop">
+      <aside className="review-drawer" role="dialog" aria-modal="true">
+        <div className="review-drawer-head">
+          <div>
+            <div className="section-title">{stageLabel(state.stage)}</div>
+            <div className="section-subtitle">
+              {videoId} / {version}
+            </div>
+          </div>
+          <button type="button" className="btn secondary-btn compact-btn" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        <div className="review-drawer-body">
+          {state.loading ? <div className="empty-state">正在加载审核数据...</div> : null}
+          {state.error ? <div className="task-error">{state.error}</div> : null}
+          {!state.loading && !state.error && state.payload ? (
+            <>
+              {state.stage === "script_review" ? (
+                <ScriptReviewClient videoId={videoId} version={version} initial={state.payload as ScriptReviewPayload} />
+              ) : null}
+              {state.stage === "storyboard_review" ? (
+                <StoryboardReviewClient videoId={videoId} version={version} initial={state.payload as StoryboardReviewPayload} />
+              ) : null}
+              {state.stage === "image_review" ? (
+                <ImageReviewClient
+                  videoId={videoId}
+                  version={version}
+                  initial={state.payload as ImageReviewPayload}
+                  context={state.context}
+                />
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </aside>
     </div>
   );
 }

@@ -13,8 +13,12 @@ export default async function ImageReviewPage({ params }: Props) {
     const initial = (await getStageData(
       videoId,
       version,
-      "images",
+    "images",
     )) as ImageReviewPayload;
+    const [scriptData, storyboardData] = await Promise.all([
+      getStageData(videoId, version, "script").catch(() => null),
+      getStageData(videoId, version, "storyboard").catch(() => null),
+    ]);
     const title = initial.artifact[0]?.title;
     const reviewStatuses = {
       ...(await getReviewStatuses(videoId, version)),
@@ -29,7 +33,15 @@ export default async function ImageReviewPage({ params }: Props) {
           active="images"
           reviewStatuses={reviewStatuses}
         />
-        <ImageReviewClient videoId={videoId} version={version} initial={initial} />
+        <ImageReviewClient
+          videoId={videoId}
+          version={version}
+          initial={initial}
+          context={{
+            script: scriptData?.artifact as never,
+            storyboard: storyboardData?.artifact as never,
+          }}
+        />
       </main>
     );
   } catch (error) {

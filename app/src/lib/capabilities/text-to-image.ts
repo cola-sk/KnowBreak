@@ -35,10 +35,16 @@ function cleanPrompt(prompt: string): string {
 
 export async function generateTextToImage(request: TextToImageRequest): Promise<TextToImageResult> {
   const provider = request.provider?.trim() || "pollinations";
-  if (provider !== "pollinations") {
-    throw new Error(`Unsupported text-to-image provider: ${provider}`);
+  if (provider === "pollinations") {
+    return generatePollinationsImage(request);
   }
-  return generatePollinationsImage(request);
+  if (provider === "cloudflare_workers") {
+    return generateCloudflareWorkersImage(request);
+  }
+  if (provider === "huggingface") {
+    return generateHuggingFaceImage(request);
+  }
+  throw new Error(`Unsupported text-to-image provider: ${provider}`);
 }
 
 async function generatePollinationsImage(request: TextToImageRequest): Promise<TextToImageResult> {
@@ -88,6 +94,132 @@ async function generatePollinationsImage(request: TextToImageRequest): Promise<T
       source_url: "",
       creator: "ai_generated",
       license: "provider_terms",
+    },
+  };
+}
+
+async function generateCloudflareWorkersImage(request: TextToImageRequest): Promise<TextToImageResult> {
+  const prompt = cleanPrompt(request.prompt);
+  const width = request.width ?? 1080;
+  const height = request.height ?? 1920;
+  const accountId = process.env.KB_CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.KB_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !apiToken) {
+    throw new Error("Cloudflare Workers AI requires KB_CLOUDFLARE_ACCOUNT_ID and KB_CLOUDFLARE_API_TOKEN");
+  }
+
+  const resolvedModel = request.model?.trim()
+    || process.env.KB_CLOUDFLARE_IMAGE_MODEL
+    || "@cf/bytedance/stable-diffusion-xl-lightning";
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${resolvedModel}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ prompt }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Cloudflare Workers AI generation failed: ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.startsWith("application/json")) {
+    const data = (await response.json()) as { result?: { image?: string }; image?: string };
+    const imageBase64 = data.result?.image ?? data.image;
+    if (!imageBase64) {
+      throw new Error("Cloudflare Workers AI returned JSON without result.image");
+    }
+    return {
+      bytes: new Uint8Array(Buffer.from(imageBase64, "base64")),
+      contentType: "image/png",
+      metadata: {
+        provider: "cloudflare_workers",
+        mode: "generate",
+        prompt,
+        model: resolvedModel,
+        width,
+        height,
+        source_url: "",
+        creator: "ai_generated",
+        license: "provider_terms",
+      },
+    };
+  }
+  if (!contentType.startsWith("image/")) {
+    throw new Error(`Cloudflare Workers AI returned non-image content: ${contentType || "unknown"}`);
+  }
+
+  return {
+    bytes: new Uint8Array(await response.arrayBuffer()),
+    contentType,
+    metadata: {
+      provider: "cloudflare_workers",
+      mode: "generate",
+      prompt,
+      model: resolvedModel,
+      width,
+      height,
+      source_url: "",
+      creator: "ai_generated",
+      license: "provider_terms",
+    },
+  };
+}
+
+async function generateHuggingFaceImage(request: TextToImageRequest): Promise<TextToImageResult> {
+  const prompt = cleanPrompt(request.prompt);
+  const width = request.width ?? 1080;
+  const height = request.height ?? 1920;
+  const apiToken = process.env.KB_HUGGINGFACE_API_TOKEN
+    || process.env.HUGGINGFACE_API_TOKEN
+    || process.env.HF_TOKEN;
+  if (!apiToken) {
+    throw new Error("Hugging Face image generation requires KB_HUGGINGFACE_API_TOKEN or HF_TOKEN");
+  }
+
+  const resolvedModel = request.model?.trim()
+    || process.env.KB_HUGGINGFACE_IMAGE_MODEL
+    || "stabilityai/stable-diffusion-xl-base-1.0";
+  const baseUrl = (process.env.KB_HUGGINGFACE_IMAGE_BASE_URL || "https://api-inference.huggingface.co/models")
+    .replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/${resolvedModel}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      Accept: "image/png",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: { width, height },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Hugging Face image generation failed: ${response.status}`);
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("image/")) {
+    const detail = (await response.text()).slice(0, 300);
+    throw new Error(`Hugging Face returned non-image content: ${contentType || "unknown"} ${detail}`);
+  }
+
+  return {
+    bytes: new Uint8Array(await response.arrayBuffer()),
+    contentType,
+    metadata: {
+      provider: "huggingface",
+      mode: "generate",
+      prompt,
+      model: resolvedModel,
+      width,
+      height,
+      source_url: "",
+      creator: "ai_generated",
+      license: "model_terms",
     },
   };
 }

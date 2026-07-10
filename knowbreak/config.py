@@ -82,6 +82,12 @@ class Config:
     pixabay_api_key: str | None = None
     pollinations_api_key: str | None = None
     pollinations_image_model: str | None = None
+    cloudflare_account_id: str | None = None
+    cloudflare_api_token: str | None = None
+    cloudflare_image_model: str = "@cf/bytedance/stable-diffusion-xl-lightning"
+    huggingface_api_token: str | None = None
+    huggingface_image_model: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    huggingface_image_base_url: str = "https://api-inference.huggingface.co/models"
 
     @property
     def inputs_dir(self) -> Path:
@@ -202,4 +208,23 @@ def load_config() -> Config:
         pollinations_api_key=_optional_env("POLLINATIONS_API_KEY")
         or _optional_env("KB_POLLINATIONS_API_KEY"),
         pollinations_image_model=_optional_env("KB_POLLINATIONS_IMAGE_MODEL"),
+        cloudflare_account_id=_optional_env("KB_CLOUDFLARE_ACCOUNT_ID")
+        or _optional_env("CLOUDFLARE_ACCOUNT_ID"),
+        cloudflare_api_token=_optional_env("KB_CLOUDFLARE_API_TOKEN")
+        or _optional_env("CLOUDFLARE_API_TOKEN"),
+        cloudflare_image_model=_env(
+            "KB_CLOUDFLARE_IMAGE_MODEL",
+            "@cf/bytedance/stable-diffusion-xl-lightning",
+        ),
+        huggingface_api_token=_optional_env("KB_HUGGINGFACE_API_TOKEN")
+        or _optional_env("HUGGINGFACE_API_TOKEN")
+        or _optional_env("HF_TOKEN"),
+        huggingface_image_model=_env(
+            "KB_HUGGINGFACE_IMAGE_MODEL",
+            "stabilityai/stable-diffusion-xl-base-1.0",
+        ),
+        huggingface_image_base_url=_env(
+            "KB_HUGGINGFACE_IMAGE_BASE_URL",
+            "https://api-inference.huggingface.co/models",
+        ),
     )

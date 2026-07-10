@@ -1731,6 +1731,52 @@ a.tab.active {
   font-size: 13px;
 }
 
+.task-review-callout {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  background: light-dark(#f8fafc, rgba(255, 255, 255, 0.03));
+}
+
+.review-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.44);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.review-drawer {
+  width: min(1180px, 92vw);
+  height: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--panel-border);
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+}
+
+.review-drawer-head {
+  padding: 16px;
+  border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.review-drawer-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
 .stage-progress-list {
   display: grid;
   gap: 8px;

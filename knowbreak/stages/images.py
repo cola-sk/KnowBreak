@@ -133,6 +133,16 @@ def _active_providers(cfg: Config) -> list[str]:
                 print("  - 跳过 Pixabay：未配置 PIXABAY_API_KEY")
         elif provider == "pollinations":
             providers.append(provider)
+        elif provider == "cloudflare_workers":
+            if cfg.cloudflare_account_id and cfg.cloudflare_api_token:
+                providers.append(provider)
+            else:
+                print("  - 跳过 Cloudflare Workers AI：未配置 KB_CLOUDFLARE_ACCOUNT_ID/KB_CLOUDFLARE_API_TOKEN")
+        elif provider == "huggingface":
+            if cfg.huggingface_api_token:
+                providers.append(provider)
+            else:
+                print("  - 跳过 Hugging Face：未配置 KB_HUGGINGFACE_API_TOKEN 或 HF_TOKEN")
         else:
             print(f"  - 跳过未知图片 provider：{provider}")
     if not providers:
@@ -239,8 +249,8 @@ def _fetch_with_fallbacks(
                 meta = _fetch_pexels(cfg.pexels_api_key, query, out_path, used_source_urls)
             elif provider == "pixabay" and cfg.pixabay_api_key:
                 meta = _fetch_pixabay(cfg.pixabay_api_key, query, out_path, used_source_urls)
-            elif provider == "pollinations":
-                meta = _fetch_pollinations(cfg, query, out_path)
+            elif provider in {"pollinations", "cloudflare_workers", "huggingface"}:
+                meta = _fetch_generated_image(cfg, provider, query, out_path)
             else:
                 meta = None
 
@@ -355,11 +365,11 @@ def _fetch_pixabay(
     return None
 
 
-def _fetch_pollinations(cfg: Config, prompt: str, out_path: Path) -> dict | None:
+def _fetch_generated_image(cfg: Config, provider: str, prompt: str, out_path: Path) -> dict | None:
     try:
-        generated = generate_text_to_image(cfg, prompt, provider="pollinations")
+        generated = generate_text_to_image(cfg, prompt, provider=provider)
         out_path.write_bytes(generated.content)
         return generated.metadata
     except Exception as e:
-        print(f"  Pollinations 生成失败 [{prompt}]: {e!r}")
+        print(f"  {provider} 生成失败 [{prompt}]: {e!r}")
         return None

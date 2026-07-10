@@ -27,15 +27,51 @@ interface TopicImages {
   shots: ShotImageEntry[];
 }
 
+interface ScriptLine {
+  text: string;
+  estimated_seconds: number;
+}
+
+interface ScriptArtifact {
+  scripts: Array<{
+    topic_index: number;
+    title: string;
+    lines: ScriptLine[];
+  }>;
+}
+
+interface StoryboardShot {
+  index: number;
+  narration: string;
+  visual: string;
+  broll: string;
+  subtitle: string;
+  duration: number;
+}
+
+interface StoryboardArtifact {
+  storyboards: Array<{
+    topic_index: number;
+    title: string;
+    shots: StoryboardShot[];
+  }>;
+}
+
 export interface ImageReviewPayload {
   artifact: TopicImages[];
   review: ReviewFile;
+}
+
+export interface ImageReviewContext {
+  script?: ScriptArtifact | null;
+  storyboard?: StoryboardArtifact | null;
 }
 
 interface Props {
   videoId: string;
   version: string;
   initial: ImageReviewPayload;
+  context?: ImageReviewContext;
 }
 
 interface CropEditorState {
@@ -50,6 +86,7 @@ interface GenerateEditorState {
   title: string;
   prompt: string;
   provider: string;
+  model: string;
   previewImageBase64?: string;
   previewContentType?: string;
   previewMetadata?: GeneratedImageMetadata;
@@ -89,6 +126,16 @@ const VIEWPORT_SIZE: Size = {
   width: 360,
   height: 640,
 };
+
+const IMAGE_PROVIDER_OPTIONS = [
+  { value: "pollinations", label: "Pollinations", defaultModel: "" },
+  { value: "cloudflare_workers", label: "Cloudflare Workers AI", defaultModel: "@cf/bytedance/stable-diffusion-xl-lightning" },
+  { value: "huggingface", label: "Hugging Face", defaultModel: "stabilityai/stable-diffusion-xl-base-1.0" },
+];
+
+function defaultModelForProvider(provider: string): string {
+  return IMAGE_PROVIDER_OPTIONS.find((option) => option.value === provider)?.defaultModel ?? "";
+}
 
 function statusClass(status: string): string {
   if (status === "approved") {
@@ -132,7 +179,7 @@ function clampOffset(offset: Point, size: Size, scale: number): Point {
   };
 }
 
-export function ImageReviewClient({ videoId, version, initial }: Props) {
+export function ImageReviewClient({ videoId, version, initial, context }: Props) {
   const [data, setData] = useState<ImageReviewPayload>(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -166,6 +213,7 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
       title,
       prompt,
       provider: "pollinations",
+      model: defaultModelForProvider("pollinations"),
     });
     setMessage("");
   };
@@ -361,6 +409,7 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
         body: JSON.stringify({
           action: "preview",
           provider: generateEditor.provider,
+          model: generateEditor.model || undefined,
           prompt,
         }),
       });
@@ -442,6 +491,14 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
     return data.review.items.find((item) => item.id === id);
   };
 
+  const shotContext = (topicIndex: number, shotIndex: number) => {
+    const script = context?.script?.scripts.find((item) => item.topic_index === topicIndex);
+    const storyboard = context?.storyboard?.storyboards.find((item) => item.topic_index === topicIndex);
+    const shot = storyboard?.shots.find((item) => item.index === shotIndex);
+    const line = script?.lines[shotIndex];
+    return { line, shot };
+  };
+
   return (
     <div className="panel" style={{ padding: 16 }}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -498,11 +555,13 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
               ) : null}
               {topic.shots.map((shot) => {
                 const id = `topic_${topic.topic_index}_shot_${shot.shot_index}`;
+                const related = shotContext(topic.topic_index, shot.shot_index);
                 return (
                   <ImageCard
                     key={id}
                     title={`shot_${shot.shot_index}`}
                     image={shot}
+                    shotContext={related}
                     item={findItem(id)}
                     onChange={patchReviewItem}
                     itemId={id}
@@ -545,6 +604,10 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
 interface ImageCardProps {
   title: string;
   image: ImageEntry;
+  shotContext?: {
+    line?: ScriptLine;
+    shot?: StoryboardShot;
+  };
   itemId: string;
   item: { status: ReviewItemStatus; notes: string } | undefined;
   onChange: (id: string, patch: Partial<{ status: ReviewItemStatus; notes: string }>) => void;
@@ -558,6 +621,7 @@ interface ImageCardProps {
 function ImageCard({
   title,
   image,
+  shotContext,
   itemId,
   item,
   onChange,
@@ -588,6 +652,31 @@ function ImageCard({
           marginTop: 8,
         }}
       />
+
+      {shotContext?.line || shotContext?.shot ? (
+        <div
+          style={{
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            padding: 10,
+            marginTop: 8,
+            display: "grid",
+            gap: 8,
+            background: "rgba(255,255,255,0.02)",
+          }}
+        >
+          {shotContext.line ? (
+            <ContextBlock label="口播文本" value={shotContext.line.text} />
+          ) : null}
+          {shotContext.shot ? (
+            <>
+              <ContextBlock label="分镜画面" value={shotContext.shot.visual} />
+              <ContextBlock label="B-roll" value={shotContext.shot.broll} />
+              <ContextBlock label="字幕" value={shotContext.shot.subtitle} />
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8, lineHeight: 1.4 }}>
         <div>mode: {image.mode ?? "-"}</div>
@@ -657,6 +746,15 @@ function ImageCard({
   );
 }
 
+function ContextBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ color: "var(--muted)", fontSize: 12 }}>{label}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{value || "-"}</div>
+    </div>
+  );
+}
+
 interface ImageGenerateModalProps {
   editor: GenerateEditorState;
   busy: boolean;
@@ -688,10 +786,37 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
           <select
             value={editor.provider}
             disabled={busy}
-            onChange={(event) => onChange({ ...editor, provider: event.target.value })}
+            onChange={(event) => {
+              const provider = event.target.value;
+              onChange({
+                ...editor,
+                provider,
+                model: defaultModelForProvider(provider),
+                previewImageBase64: undefined,
+                previewContentType: undefined,
+                previewMetadata: undefined,
+              });
+            }}
           >
-            <option value="pollinations">pollinations</option>
+            {IMAGE_PROVIDER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>model</label>
+          <input
+            value={editor.model}
+            disabled={busy}
+            placeholder="使用 provider 默认模型"
+            onChange={(event) => onChange({
+              ...editor,
+              model: event.target.value,
+              previewImageBase64: undefined,
+              previewContentType: undefined,
+              previewMetadata: undefined,
+            })}
+          />
           <label style={{ fontSize: 12, color: "var(--muted)" }}>prompt</label>
           <textarea
             value={editor.prompt}

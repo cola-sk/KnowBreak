@@ -65,7 +65,27 @@ def test_pollinations_provider_is_active_without_key(tmp_path: Path) -> None:
     assert images._active_providers(cfg) == ["pollinations"]
 
 
-def test_pollinations_fetch_writes_generated_image_metadata(tmp_path: Path, monkeypatch) -> None:
+def test_generated_providers_require_credentials_for_pipeline(tmp_path: Path) -> None:
+    base = dict(
+        llm=LLMConfig(base_url="http://example.invalid/v1", api_key="test", model="test"),
+        asr=ASRConfig(provider="openai", model="test"),
+        tts=TTSConfig(),
+        intro=IntroConfig(),
+        out_dir=tmp_path / "out",
+        project_root=tmp_path,
+        image_providers=("cloudflare_workers", "huggingface"),
+    )
+
+    assert images._active_providers(Config(**base)) == []
+    assert images._active_providers(Config(
+        **base,
+        cloudflare_account_id="account",
+        cloudflare_api_token="token",
+        huggingface_api_token="hf_token",
+    )) == ["cloudflare_workers", "huggingface"]
+
+
+def test_generated_provider_fetch_writes_generated_image_metadata(tmp_path: Path, monkeypatch) -> None:
     out_dir = tmp_path / "out"
     out_path = out_dir / "video123" / "images" / "0" / "shot_000.jpg"
     out_path.parent.mkdir(parents=True)
@@ -76,11 +96,13 @@ def test_pollinations_fetch_writes_generated_image_metadata(tmp_path: Path, monk
         intro=IntroConfig(),
         out_dir=out_dir,
         project_root=tmp_path,
-        image_providers=("pollinations",),
-        pollinations_image_model="flux",
+        image_providers=("huggingface",),
+        huggingface_api_token="hf_token",
+        huggingface_image_model="stabilityai/sdxl",
     )
 
     def fake_generate_text_to_image(cfg, prompt: str, *, provider: str, width: int = 1080, height: int = 1920):
+        assert provider == "huggingface"
         return GeneratedImage(
             content=b"fake-jpeg",
             metadata={
@@ -89,7 +111,7 @@ def test_pollinations_fetch_writes_generated_image_metadata(tmp_path: Path, monk
                 "creator": "ai_generated",
                 "license": "provider_terms",
                 "prompt": prompt,
-                "model": cfg.pollinations_image_model or "pollinations",
+                "model": cfg.huggingface_image_model,
                 "width": width,
                 "height": height,
             },
@@ -99,7 +121,7 @@ def test_pollinations_fetch_writes_generated_image_metadata(tmp_path: Path, monk
 
     meta = images._fetch_with_fallbacks(
         cfg,
-        ["pollinations"],
+        ["huggingface"],
         ["science diagram"],
         out_path,
         set(),
@@ -107,7 +129,7 @@ def test_pollinations_fetch_writes_generated_image_metadata(tmp_path: Path, monk
 
     assert out_path.read_bytes() == b"fake-jpeg"
     assert meta is not None
-    assert meta["provider"] == "pollinations"
+    assert meta["provider"] == "huggingface"
     assert meta["mode"] == "generate"
     assert meta["prompt"] == "science diagram"
-    assert meta["model"] == "flux"
+    assert meta["model"] == "stabilityai/sdxl"
