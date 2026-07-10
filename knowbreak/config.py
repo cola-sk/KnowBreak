@@ -80,6 +80,8 @@ class Config:
     image_providers: tuple[str, ...] = ("pexels", "pixabay")
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None
+    pollinations_api_key: str | None = None
+    pollinations_image_model: str | None = None
 
     @property
     def inputs_dir(self) -> Path:
@@ -197,4 +199,7 @@ def load_config() -> Config:
         image_providers=_image_providers(),
         pexels_api_key=_optional_env("PEXELS_API_KEY") or _optional_env("KB_PEXELS_API_KEY"),
         pixabay_api_key=_optional_env("PIXABAY_API_KEY") or _optional_env("KB_PIXABAY_API_KEY"),
+        pollinations_api_key=_optional_env("POLLINATIONS_API_KEY")
+        or _optional_env("KB_POLLINATIONS_API_KEY"),
+        pollinations_image_model=_optional_env("KB_POLLINATIONS_IMAGE_MODEL"),
     )

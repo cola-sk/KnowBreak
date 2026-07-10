@@ -7,10 +7,13 @@ import type { ReviewFile, ReviewItemStatus } from "@/lib/types";
 interface ImageEntry {
   image_path: string;
   provider?: string;
+  mode?: string;
   query?: string;
+  prompt?: string;
   source_url?: string;
   creator?: string;
   license?: string;
+  model?: string;
 }
 
 interface ShotImageEntry extends ImageEntry {
@@ -40,6 +43,28 @@ interface CropEditorState {
   title: string;
   objectUrl: string;
   fileName: string;
+}
+
+interface GenerateEditorState {
+  itemId: string;
+  title: string;
+  prompt: string;
+  provider: string;
+  previewImageBase64?: string;
+  previewContentType?: string;
+  previewMetadata?: GeneratedImageMetadata;
+}
+
+interface GeneratedImageMetadata {
+  provider: string;
+  mode: "generate";
+  prompt: string;
+  model?: string;
+  width?: number;
+  height?: number;
+  source_url?: string;
+  creator?: string;
+  license?: string;
 }
 
 interface Point {
@@ -112,7 +137,9 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [editor, setEditor] = useState<CropEditorState | null>(null);
+  const [generateEditor, setGenerateEditor] = useState<GenerateEditorState | null>(null);
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
+  const [generatingItemId, setGeneratingItemId] = useState<string | null>(null);
 
   const totalImages = useMemo(
     () =>
@@ -130,6 +157,17 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
       }
       return null;
     });
+  };
+
+  const openGenerateEditor = (itemId: string, title: string, image: ImageEntry) => {
+    const prompt = image.prompt || image.query || `${title}, vertical 9:16 documentary science image`;
+    setGenerateEditor({
+      itemId,
+      title,
+      prompt,
+      provider: "pollinations",
+    });
+    setMessage("");
   };
 
   const openEditorForFile = (itemId: string, title: string, file: File) => {
@@ -302,6 +340,104 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
     }
   };
 
+  const generatePreviewImage = async () => {
+    if (!generateEditor) {
+      return;
+    }
+    const prompt = generateEditor.prompt.trim();
+    if (!prompt) {
+      setMessage("请输入生图提示词。");
+      return;
+    }
+
+    setSaving(true);
+    setGeneratingItemId(generateEditor.itemId);
+    setMessage("");
+
+    try {
+      const response = await fetch(`/api/projects/${videoId}/${version}/images/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "preview",
+          provider: generateEditor.provider,
+          prompt,
+        }),
+      });
+      const payload = (await response.json()) as
+        | {
+            preview?: {
+              imageBase64: string;
+              contentType: string;
+              metadata: GeneratedImageMetadata;
+            };
+          }
+        | { error: string };
+
+      if (!response.ok || !("preview" in payload) || !payload.preview) {
+        throw new Error("error" in payload ? payload.error : "生成失败");
+      }
+      setGenerateEditor((prev) => prev
+        ? {
+            ...prev,
+            previewImageBase64: payload.preview!.imageBase64,
+            previewContentType: payload.preview!.contentType,
+            previewMetadata: payload.preview!.metadata,
+          }
+        : prev);
+      setMessage("AI 图片已生成预览，确认后点击插入替换。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "生成失败");
+    } finally {
+      setSaving(false);
+      setGeneratingItemId(null);
+    }
+  };
+
+  const insertGeneratedImage = async () => {
+    if (!generateEditor?.previewImageBase64 || !generateEditor.previewMetadata) {
+      setMessage("请先生成预览图。");
+      return;
+    }
+
+    setSaving(true);
+    setGeneratingItemId(generateEditor.itemId);
+    setMessage("");
+
+    try {
+      const response = await fetch(`/api/projects/${videoId}/${version}/images/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "insert",
+          itemId: generateEditor.itemId,
+          imageBase64: generateEditor.previewImageBase64,
+          metadata: generateEditor.previewMetadata,
+        }),
+      });
+      const payload = (await response.json()) as
+        | (ImageReviewPayload & { imagePath: string })
+        | { error: string };
+
+      if (!response.ok) {
+        throw new Error("error" in payload ? payload.error : "插入失败");
+      }
+      const successPayload = payload as ImageReviewPayload & { imagePath: string };
+
+      setData({
+        artifact: successPayload.artifact,
+        review: successPayload.review,
+      });
+      setGenerateEditor(null);
+      setMessage(`AI 图片已插入并替换本地文件：${successPayload.imagePath}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "插入失败");
+    } finally {
+      setSaving(false);
+      setGeneratingItemId(null);
+    }
+  };
+
   const findItem = (id: string) => {
     return data.review.items.find((item) => item.id === id);
   };
@@ -355,7 +491,9 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
                   itemId={`topic_${topic.topic_index}_cover`}
                   imageVersionToken={data.review.updated_at}
                   onReplaceFile={openEditorForFile}
+                  onGenerate={openGenerateEditor}
                   replacing={uploadingItemId === `topic_${topic.topic_index}_cover`}
+                  generating={generatingItemId === `topic_${topic.topic_index}_cover`}
                 />
               ) : null}
               {topic.shots.map((shot) => {
@@ -370,7 +508,9 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
                     itemId={id}
                     imageVersionToken={data.review.updated_at}
                     onReplaceFile={openEditorForFile}
+                    onGenerate={openGenerateEditor}
                     replacing={uploadingItemId === id}
+                    generating={generatingItemId === id}
                   />
                 );
               })}
@@ -388,6 +528,16 @@ export function ImageReviewClient({ videoId, version, initial }: Props) {
           onPickAnother={replaceEditorSource}
         />
       ) : null}
+      {generateEditor ? (
+        <ImageGenerateModal
+          editor={generateEditor}
+          busy={saving}
+          onChange={setGenerateEditor}
+          onClose={() => setGenerateEditor(null)}
+          onGeneratePreview={generatePreviewImage}
+          onInsert={insertGeneratedImage}
+        />
+      ) : null}
     </div>
   );
 }
@@ -400,7 +550,9 @@ interface ImageCardProps {
   onChange: (id: string, patch: Partial<{ status: ReviewItemStatus; notes: string }>) => void;
   imageVersionToken: string;
   onReplaceFile: (itemId: string, title: string, file: File) => void;
+  onGenerate: (itemId: string, title: string, image: ImageEntry) => void;
   replacing: boolean;
+  generating: boolean;
 }
 
 function ImageCard({
@@ -411,7 +563,9 @@ function ImageCard({
   onChange,
   imageVersionToken,
   onReplaceFile,
+  onGenerate,
   replacing,
+  generating,
 }: ImageCardProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -436,7 +590,10 @@ function ImageCard({
       />
 
       <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8, lineHeight: 1.4 }}>
+        <div>mode: {image.mode ?? "-"}</div>
         <div>query: {image.query ?? "-"}</div>
+        <div>prompt: {image.prompt ?? "-"}</div>
+        <div>model: {image.model ?? "-"}</div>
         <div>creator: {image.creator ?? "-"}</div>
         <div style={{ wordBreak: "break-all" }}>source: {image.source_url ?? "-"}</div>
       </div>
@@ -492,6 +649,87 @@ function ImageCard({
         <button className="secondary" disabled={replacing} onClick={() => inputRef.current?.click()}>
           {replacing ? "替换中..." : "上传并裁剪"}
         </button>
+        <button className="secondary" disabled={generating} onClick={() => onGenerate(itemId, title, image)}>
+          {generating ? "生成中..." : "AI 生成替换"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface ImageGenerateModalProps {
+  editor: GenerateEditorState;
+  busy: boolean;
+  onChange: (next: GenerateEditorState) => void;
+  onClose: () => void;
+  onGeneratePreview: () => Promise<void>;
+  onInsert: () => Promise<void>;
+}
+
+function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview, onInsert }: ImageGenerateModalProps) {
+  const previewSrc = editor.previewImageBase64
+    ? `data:${editor.previewContentType ?? "image/jpeg"};base64,${editor.previewImageBase64}`
+    : "";
+
+  return (
+    <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
+      <div className="image-lightbox" style={{ maxWidth: 760 }}>
+        <div className="image-lightbox-head">
+          <div>
+            <div style={{ fontWeight: 700 }}>AI 生成替换</div>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>{editor.title}</div>
+          </div>
+          <button className="secondary" disabled={busy} onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>provider</label>
+          <select
+            value={editor.provider}
+            disabled={busy}
+            onChange={(event) => onChange({ ...editor, provider: event.target.value })}
+          >
+            <option value="pollinations">pollinations</option>
+          </select>
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>prompt</label>
+          <textarea
+            value={editor.prompt}
+            disabled={busy}
+            rows={8}
+            onChange={(event) => onChange({
+              ...editor,
+              prompt: event.target.value,
+              previewImageBase64: undefined,
+              previewContentType: undefined,
+              previewMetadata: undefined,
+            })}
+          />
+          {previewSrc ? (
+            <img
+              src={previewSrc}
+              alt="AI 生成预览"
+              style={{
+                width: "100%",
+                maxHeight: 520,
+                objectFit: "contain",
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+              }}
+            />
+          ) : null}
+        </div>
+        <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+          <button className="secondary" disabled={busy} onClick={onClose}>
+            取消
+          </button>
+          <button className="secondary" disabled={busy} onClick={onGeneratePreview}>
+            {busy ? "生成中..." : "生成预览"}
+          </button>
+          <button className="approve-btn" disabled={busy || !previewSrc} onClick={onInsert}>
+            {busy ? "插入中..." : "插入替换"}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,10 +1,10 @@
 import { ProfileEditor } from "@/components/profile-editor";
+import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
 import { resolveOutDir, resolveProjectRoot } from "@/lib/review-store";
-import { existsSync } from "node:fs";
-import fs from "node:fs/promises";
 import path from "node:path";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const overridesPath = path.join(
@@ -13,14 +13,10 @@ export default async function SettingsPage() {
     "serious_science",
     "profile_overrides.json",
   );
-  let initial: Record<string, unknown> = {};
-  try {
-    if (existsSync(overridesPath)) {
-      initial = JSON.parse(await fs.readFile(overridesPath, "utf-8")) as Record<string, unknown>;
-    }
-  } catch {
-    initial = {};
-  }
+  const [initial, base] = await Promise.all([
+    readProfileOverrides(),
+    readProfileBase(),
+  ]);
 
   return (
     <main className="shell">
@@ -34,7 +30,7 @@ export default async function SettingsPage() {
           本地目录：{resolveOutDir()}
         </div>
       </div>
-      <ProfileEditor initial={initial} />
+      <ProfileEditor initial={initial} base={base} />
     </main>
   );
 }

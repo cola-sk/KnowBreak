@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
 import type { RegenerationJob, ReviewFile, ReviewStage } from "@/lib/types";
 
 interface ScriptLine {
@@ -46,10 +47,13 @@ interface StoryboardArtifact {
 interface ImageEntry {
   image_path: string;
   provider?: string;
+  mode?: string;
   query?: string;
+  prompt?: string;
   source_url?: string;
   creator?: string;
   license?: string;
+  model?: string;
 }
 
 interface ShotImageEntry extends ImageEntry {
@@ -93,6 +97,8 @@ export interface ProductionReviewPayload {
 
 interface Props {
   initial: ProductionReviewPayload;
+  profileBase: Record<string, unknown>;
+  globalOverrides: Record<string, unknown>;
 }
 
 interface CropEditorState {
@@ -100,6 +106,28 @@ interface CropEditorState {
   title: string;
   objectUrl: string;
   fileName: string;
+}
+
+interface GenerateEditorState {
+  itemId: string;
+  title: string;
+  prompt: string;
+  provider: string;
+  previewImageBase64?: string;
+  previewContentType?: string;
+  previewMetadata?: GeneratedImageMetadata;
+}
+
+interface GeneratedImageMetadata {
+  provider: string;
+  mode: "generate";
+  prompt: string;
+  model?: string;
+  width?: number;
+  height?: number;
+  source_url?: string;
+  creator?: string;
+  license?: string;
 }
 
 interface LightboxState {
@@ -199,13 +227,15 @@ function clampOffset(offset: Point, size: Size, scale: number): Point {
   };
 }
 
-export function ProductionReviewClient({ initial }: Props) {
+export function ProductionReviewClient({ initial, profileBase, globalOverrides }: Props) {
   const [data, setData] = useState<ProductionReviewPayload>(initial);
   const [topicIndex, setTopicIndex] = useState<number>(initial.videos[0]?.topic_index ?? 0);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
+  const [generatingItemId, setGeneratingItemId] = useState<string | null>(null);
   const [editor, setEditor] = useState<CropEditorState | null>(null);
+  const [generateEditor, setGenerateEditor] = useState<GenerateEditorState | null>(null);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<"create" | "update">("update");
@@ -219,15 +249,7 @@ export function ProductionReviewClient({ initial }: Props) {
   // Project overrides state
   const [projectOverrides, setProjectOverrides] = useState<Record<string, any>>(() => initial.projectOverrides ?? {});
   const [showConfig, setShowConfig] = useState(false);
-  const [aspectRatioPreset, setAspectRatioPreset] = useState(() => {
-    const w = initial.projectOverrides?.compose?.video_w;
-    const h = initial.projectOverrides?.compose?.video_h;
-    if (w === 1080 && h === 1920) return "vertical";
-    if (w === 1920 && h === 1080) return "horizontal";
-    if (w === 1080 && h === 1080) return "square";
-    if (w || h) return "custom";
-    return "inherit";
-  });
+  const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
 
   const selectedVideo = useMemo(() => {
     return data.videos.find((video) => video.topic_index === topicIndex) ?? data.videos[0] ?? null;
@@ -289,6 +311,16 @@ export function ProductionReviewClient({ initial }: Props) {
       }
       return null;
     });
+  };
+
+  const openGenerateEditor = (itemId: string, title: string, prompt: string) => {
+    setGenerateEditor({
+      itemId,
+      title,
+      prompt,
+      provider: "pollinations",
+    });
+    setMessage("");
   };
 
   const openEditorForFile = (itemId: string, title: string, file: File) => {
@@ -465,10 +497,13 @@ export function ProductionReviewClient({ initial }: Props) {
         const cleared = {
           image_path: "",
           provider: "manual",
+          mode: "",
           query: "",
+          prompt: "",
           source_url: "",
           creator: "",
           license: "",
+          model: "",
         };
         if (kind === "cover" && topic.cover) {
           return { ...topic, cover: cleared };
@@ -590,6 +625,102 @@ export function ProductionReviewClient({ initial }: Props) {
     }
   };
 
+  const generatePreviewImage = async () => {
+    if (!generateEditor) {
+      return;
+    }
+    const prompt = generateEditor.prompt.trim();
+    if (!prompt) {
+      setMessage("请输入生图提示词。");
+      return;
+    }
+
+    setSaving(true);
+    setGeneratingItemId(generateEditor.itemId);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "preview",
+          provider: generateEditor.provider,
+          prompt,
+        }),
+      });
+      const payload = (await response.json()) as
+        | {
+            preview?: {
+              imageBase64: string;
+              contentType: string;
+              metadata: GeneratedImageMetadata;
+            };
+          }
+        | { error: string };
+
+      if (!response.ok || !("preview" in payload) || !payload.preview) {
+        throw new Error("error" in payload ? payload.error : "AI 图片生成失败");
+      }
+      setGenerateEditor((prev) => prev
+        ? {
+            ...prev,
+            previewImageBase64: payload.preview!.imageBase64,
+            previewContentType: payload.preview!.contentType,
+            previewMetadata: payload.preview!.metadata,
+          }
+        : prev);
+      setMessage("AI 图片已生成预览，确认后点击插入替换。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "AI 图片生成失败");
+    } finally {
+      setSaving(false);
+      setGeneratingItemId(null);
+    }
+  };
+
+  const insertGeneratedImage = async () => {
+    if (!generateEditor?.previewImageBase64 || !generateEditor.previewMetadata) {
+      setMessage("请先生成预览图。");
+      return;
+    }
+
+    setSaving(true);
+    setGeneratingItemId(generateEditor.itemId);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "insert",
+          itemId: generateEditor.itemId,
+          imageBase64: generateEditor.previewImageBase64,
+          metadata: generateEditor.previewMetadata,
+        }),
+      });
+      const payload = (await response.json()) as
+        | { artifact?: TopicImages[]; review?: ReviewFile; imagePath?: string; error?: string }
+        | { error: string };
+
+      if (!response.ok || !("artifact" in payload) || !payload.artifact || !payload.review) {
+        throw new Error("error" in payload ? payload.error : "AI 图片插入失败");
+      }
+
+      setData((prev) => ({
+        ...prev,
+        artifacts: { ...prev.artifacts, images: payload.artifact as TopicImages[] },
+        reviews: { ...prev.reviews, image_review: payload.review as ReviewFile },
+      }));
+      setGenerateEditor(null);
+      setMessage(`AI 图片已插入并替换本地文件：${payload.imagePath ?? generateEditor.itemId}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "AI 图片插入失败");
+    } finally {
+      setSaving(false);
+      setGeneratingItemId(null);
+    }
+  };
+
   const regenerate = async (saveBeforeRun: boolean) => {
     setRegenerating(true);
     if (saveBeforeRun) {
@@ -609,7 +740,7 @@ export function ProductionReviewClient({ initial }: Props) {
           targetVersion: targetVersion.trim() || undefined,
           source,
           workflow,
-          projectOverrides: Object.keys(projectOverrides).length > 0 ? projectOverrides : undefined,
+          projectOverrides: countOverrideLeaves(projectOverrides) > 0 ? projectOverrides : undefined,
         }),
       });
       const payload = (await response.json()) as { job?: RegenerationJob; error?: string };
@@ -697,14 +828,14 @@ export function ProductionReviewClient({ initial }: Props) {
         </section>
 
         <section className="panel" style={{ padding: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 18 }}>保存与重生成</div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>表单保存与 MP4 重生成</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
-            修改文案、分镜和图片后，可以先保存，也可以保存后直接从指定阶段重生成。
+            保存只写入本页表单里的脚本、分镜和图片元数据；上传图片、粘贴图片、AI 插入替换会立即写入本地文件和审核数据。
           </div>
 
           <div className="row" style={{ marginTop: 12 }}>
             <button className="secondary" disabled={saving || regenerating} onClick={saveAll}>
-              {saving ? "保存中..." : "保存当前修改"}
+              {saving ? "保存中..." : "保存表单修改"}
             </button>
           </div>
 
@@ -742,214 +873,24 @@ export function ProductionReviewClient({ initial }: Props) {
             ) : null}
 
             {/* Project specific overrides in regeneration form */}
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
               <button
                 type="button"
                 className="btn secondary-btn"
-                onClick={() => setShowConfig(!showConfig)}
+                onClick={() => setShowConfig(true)}
                 style={{ width: "100%", justifyContent: "space-between", fontSize: 12, padding: "8px 12px" }}
               >
-                <span>⚙️ 自定义项目专属参数 {Object.keys(projectOverrides).length > 0 ? `(${Object.keys(projectOverrides).length} 项修改)` : ""}</span>
-                <span>{showConfig ? "收起" : "展开"}</span>
+                <span>自定义项目专属参数 {countOverrideLeaves(projectOverrides) > 0 ? `(${countOverrideLeaves(projectOverrides)} 项修改)` : ""}</span>
+                <span>打开可视化设置</span>
               </button>
-              
-              {showConfig && (
-                <div style={{ marginTop: 10, display: "grid", gap: 10, fontSize: 13, borderLeft: "2px solid var(--accent)", paddingLeft: 10 }}>
-                  <div>
-                    <label style={{ fontSize: 11, color: "var(--muted)" }}>视频品牌水印</label>
-                    <input
-                      type="text"
-                      placeholder="继承全局默认"
-                      value={projectOverrides.compose?.brand || ""}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setProjectOverrides(prev => {
-                          const next = structuredClone(prev);
-                          if (!next.compose) next.compose = {};
-                          if (val) next.compose.brand = val;
-                          else delete next.compose.brand;
-                          return next;
-                        });
-                      }}
-                    />
-                  </div>
-                  
-                  <div>
-                    <label style={{ fontSize: 11, color: "var(--muted)" }}>视频比例 / 尺寸</label>
-                    <select
-                      value={aspectRatioPreset}
-                      onChange={(e) => {
-                        const preset = e.target.value;
-                        setAspectRatioPreset(preset);
-                        setProjectOverrides(prev => {
-                          const next = structuredClone(prev);
-                          if (!next.compose) next.compose = {};
-                          if (preset === "vertical") {
-                            next.compose.video_w = 1080;
-                            next.compose.video_h = 1920;
-                          } else if (preset === "horizontal") {
-                            next.compose.video_w = 1920;
-                            next.compose.video_h = 1080;
-                          } else if (preset === "square") {
-                            next.compose.video_w = 1080;
-                            next.compose.video_h = 1080;
-                          } else {
-                            delete next.compose.video_w;
-                            delete next.compose.video_h;
-                          }
-                          return next;
-                        });
-                      }}
-                    >
-                      <option value="inherit">继承全局默认比例</option>
-                      <option value="vertical">📱 竖屏 9:16 (1080x1920)</option>
-                      <option value="horizontal">💻 横屏 16:9 (1920x1080)</option>
-                      <option value="square">⏹️ 方形 1:1 (1080x1080)</option>
-                      <option value="custom">🛠️ 自定义尺寸</option>
-                    </select>
-                  </div>
-
-                  {aspectRatioPreset === "custom" && (
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: 11, color: "var(--muted)" }}>宽</label>
-                        <input
-                          type="number"
-                          placeholder="宽度"
-                          value={projectOverrides.compose?.video_w || ""}
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : "";
-                            setProjectOverrides(prev => {
-                              const next = structuredClone(prev);
-                              if (!next.compose) next.compose = {};
-                              if (val) next.compose.video_w = val;
-                              else delete next.compose.video_w;
-                              return next;
-                            });
-                          }}
-                        />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: 11, color: "var(--muted)" }}>高</label>
-                        <input
-                          type="number"
-                          placeholder="高度"
-                          value={projectOverrides.compose?.video_h || ""}
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : "";
-                            setProjectOverrides(prev => {
-                              const next = structuredClone(prev);
-                              if (!next.compose) next.compose = {};
-                              if (val) next.compose.video_h = val;
-                              else delete next.compose.video_h;
-                              return next;
-                            });
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div>
-                    <label style={{ fontSize: 11, color: "var(--muted)" }}>单选题最短时长(秒)</label>
-                    <input
-                      type="number"
-                      placeholder="继承全局默认"
-                      value={projectOverrides.topics?.target_duration_min || ""}
-                      onChange={(e) => {
-                        const val = e.target.value ? Number(e.target.value) : "";
-                        setProjectOverrides(prev => {
-                          const next = structuredClone(prev);
-                          if (!next.topics) next.topics = {};
-                          if (val) next.topics.target_duration_min = val;
-                          else delete next.topics.target_duration_min;
-                          return next;
-                        });
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: 11, color: "var(--muted)" }}>单选题最长时长(秒)</label>
-                    <input
-                      type="number"
-                      placeholder="继承全局默认"
-                      value={projectOverrides.topics?.target_duration_max || ""}
-                      onChange={(e) => {
-                        const val = e.target.value ? Number(e.target.value) : "";
-                        setProjectOverrides(prev => {
-                          const next = structuredClone(prev);
-                          if (!next.topics) next.topics = {};
-                          if (val) next.topics.target_duration_max = val;
-                          else delete next.topics.target_duration_max;
-                          return next;
-                        });
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: 11, color: "var(--muted)" }}>底部进度条</label>
-                    <select
-                      value={
-                        projectOverrides.compose?.progress_bar_enabled === undefined
-                          ? "inherit"
-                          : projectOverrides.compose?.progress_bar_enabled
-                            ? "true"
-                            : "false"
-                      }
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setProjectOverrides(prev => {
-                          const next = structuredClone(prev);
-                          if (!next.compose) next.compose = {};
-                          if (val === "inherit") delete next.compose.progress_bar_enabled;
-                          else next.compose.progress_bar_enabled = val === "true";
-                          return next;
-                        });
-                      }}
-                    >
-                      <option value="inherit">继承全局默认</option>
-                      <option value="true">启用进度条</option>
-                      <option value="false">禁用进度条</option>
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label style={{ fontSize: 11, color: "var(--muted)" }}>片头启用</label>
-                    <select
-                      value={
-                        projectOverrides.intro?.enabled === undefined
-                          ? "inherit"
-                          : projectOverrides.intro?.enabled
-                            ? "true"
-                            : "false"
-                      }
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setProjectOverrides(prev => {
-                          const next = structuredClone(prev);
-                          if (!next.intro) next.intro = {};
-                          if (val === "inherit") delete next.intro.enabled;
-                          else next.intro.enabled = val === "true";
-                          return next;
-                        });
-                      }}
-                    >
-                      <option value="inherit">继承全局默认</option>
-                      <option value="true">启用片头</option>
-                      <option value="false">禁用片头</option>
-                    </select>
-                  </div>
-                </div>
-              )}
+              <div className="section-subtitle">随本次重生成请求保存为项目级覆盖，不影响全局设置。</div>
             </div>
             <div className="row">
               <button className="warn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
-                {saving || regenerating ? "处理中..." : "保存并重生成"}
+                {saving || regenerating ? "处理中..." : "保存表单修改并重生成 MP4"}
               </button>
               <button className="secondary" disabled={saving || regenerating} onClick={() => regenerate(false)}>
-                仅重生成
+                直接重生成 MP4
               </button>
             </div>
           </div>
@@ -990,10 +931,12 @@ export function ProductionReviewClient({ initial }: Props) {
           images={selectedImages}
           imageToken={imageToken}
           replacingItemId={replacingItemId}
+          generatingItemId={generatingItemId}
           onScriptChange={updateScriptLine}
           onShotChange={updateShot}
           onImageChange={updateImage}
           onImageReplace={openEditorForFile}
+          onImageGenerate={openGenerateEditor}
           onImageDelete={deleteImage}
           onImageZoom={(title, src) => setLightbox({ title, src })}
         />
@@ -1016,6 +959,28 @@ export function ProductionReviewClient({ initial }: Props) {
           onClose={() => setLightbox(null)}
         />
       ) : null}
+
+      {generateEditor ? (
+        <ImageGenerateModal
+          editor={generateEditor}
+          busy={saving}
+          onChange={setGenerateEditor}
+          onClose={() => setGenerateEditor(null)}
+          onGeneratePreview={generatePreviewImage}
+          onInsert={insertGeneratedImage}
+        />
+      ) : null}
+
+      {showConfig ? (
+        <ProjectProfileConfigModal
+          title="项目专属参数"
+          description="这里的修改会随重生成任务保存到当前项目版本，不会写入全局 profile_overrides.json。"
+          base={inheritedProfile}
+          value={projectOverrides}
+          onChange={setProjectOverrides}
+          onClose={() => setShowConfig(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1026,10 +991,12 @@ function GroupedTopicEditor({
   images,
   imageToken,
   replacingItemId,
+  generatingItemId,
   onScriptChange,
   onShotChange,
   onImageChange,
   onImageReplace,
+  onImageGenerate,
   onImageDelete,
   onImageZoom,
 }: {
@@ -1038,10 +1005,12 @@ function GroupedTopicEditor({
   images: TopicImages | null;
   imageToken: string;
   replacingItemId: string | null;
+  generatingItemId: string | null;
   onScriptChange: (lineIndex: number, key: keyof ScriptLine, value: string) => void;
   onShotChange: (shotIndex: number, key: keyof Shot, value: string) => void;
   onImageChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
   onImageReplace: (itemId: string, title: string, file: File) => void;
+  onImageGenerate: (itemId: string, title: string, prompt: string) => void;
   onImageDelete: (kind: "cover" | "shot", shotIndex: number | undefined) => void;
   onImageZoom: (title: string, src: string) => void;
 }) {
@@ -1054,6 +1023,10 @@ function GroupedTopicEditor({
   if (shotCount === 0 && !images?.cover) {
     return <div className="sub-panel" style={{ marginTop: 12 }}>未找到可审核的分镜信息。</div>;
   }
+
+  const buildPrompt = (image: ImageEntry, fallback: string): string => {
+    return image.prompt || image.query || fallback;
+  };
 
   return (
     <div className="shot-review-stack">
@@ -1068,13 +1041,19 @@ function GroupedTopicEditor({
               title="封面图片"
               itemId={`topic_${images.topic_index}_cover`}
               replacing={replacingItemId === `topic_${images.topic_index}_cover`}
+              generating={generatingItemId === `topic_${images.topic_index}_cover`}
               onReplace={(file) => onImageReplace(`topic_${images.topic_index}_cover`, "封面图片", file)}
+              onGenerate={() => onImageGenerate(
+                `topic_${images.topic_index}_cover`,
+                "封面图片",
+                buildPrompt(images.cover!, `${images.title}, vertical 9:16 documentary science cover image`),
+              )}
               onDelete={() => onImageDelete("cover", undefined)}
               onZoom={(src) => onImageZoom("封面图片", src)}
             />
           </div>
           <div className="field-group">
-            <details className="image-meta-details">
+            <details className="image-meta-details" open>
               <summary className="field-group-title">封面图片信息</summary>
             <ImageMetaEditor
               title="cover"
@@ -1131,7 +1110,22 @@ function GroupedTopicEditor({
                       title={`shot ${image.shot_index}`}
                       itemId={imageItemId ?? `shot_${displayIndex}`}
                       replacing={Boolean(imageItemId && replacingItemId === imageItemId)}
+                      generating={Boolean(imageItemId && generatingItemId === imageItemId)}
                       onReplace={(file) => imageItemId && onImageReplace(imageItemId, `shot ${image.shot_index}`, file)}
+                      onGenerate={() => imageItemId && onImageGenerate(
+                        imageItemId,
+                        `shot ${image.shot_index}`,
+                        buildPrompt(
+                          image,
+                          [
+                            shot?.visual,
+                            shot?.broll,
+                            shot?.subtitle,
+                            line?.text,
+                            "vertical 9:16 documentary science image",
+                          ].filter(Boolean).join(", "),
+                        ),
+                      )}
                       onDelete={() => onImageDelete("shot", image.shot_index)}
                       onZoom={(src) => onImageZoom(`shot ${image.shot_index}`, src)}
                     />
@@ -1229,7 +1223,10 @@ function ImageMetaEditor({
         />
       )}
       <FieldInput label="provider" value={image.provider ?? ""} onChange={(value) => onChange("provider", value)} />
+      <FieldInput label="mode" value={image.mode ?? ""} onChange={(value) => onChange("mode", value)} />
       <FieldInput label="query" value={image.query ?? ""} onChange={(value) => onChange("query", value)} />
+      <FieldTextarea label="prompt" value={image.prompt ?? ""} onChange={(value) => onChange("prompt", value)} />
+      <FieldInput label="model" value={image.model ?? ""} onChange={(value) => onChange("model", value)} />
       <FieldInput label="creator" value={image.creator ?? ""} onChange={(value) => onChange("creator", value)} />
       <FieldInput label="license" value={image.license ?? ""} onChange={(value) => onChange("license", value)} />
       <FieldTextarea label="source_url" value={image.source_url ?? ""} onChange={(value) => onChange("source_url", value)} />
@@ -1243,7 +1240,9 @@ function ImageActionPanel({
   title,
   itemId,
   replacing,
+  generating,
   onReplace,
+  onGenerate,
   onDelete,
   onZoom,
 }: {
@@ -1252,7 +1251,9 @@ function ImageActionPanel({
   title: string;
   itemId: string;
   replacing: boolean;
+  generating: boolean;
   onReplace: (file: File) => void;
+  onGenerate: () => void;
   onDelete: () => void;
   onZoom: (src: string) => void;
 }) {
@@ -1310,6 +1311,9 @@ function ImageActionPanel({
         <button type="button" className="secondary compact-btn" disabled={replacing} onClick={() => inputRef.current?.click()}>
           {replacing ? "替换中" : "上传"}
         </button>
+        <button type="button" className="secondary compact-btn" disabled={generating} onClick={onGenerate}>
+          {generating ? "生成中" : "生图"}
+        </button>
         <button type="button" className="secondary compact-btn" disabled={replacing} onClick={() => panelRef.current?.focus()}>
           粘贴
         </button>
@@ -1327,6 +1331,84 @@ function ImageActionPanel({
         </button>
       </div>
       <div className="image-action-hint">点击此区域后可直接粘贴图片。ID: {itemId}</div>
+    </div>
+  );
+}
+
+interface ImageGenerateModalProps {
+  editor: GenerateEditorState;
+  busy: boolean;
+  onChange: (next: GenerateEditorState) => void;
+  onClose: () => void;
+  onGeneratePreview: () => Promise<void>;
+  onInsert: () => Promise<void>;
+}
+
+function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview, onInsert }: ImageGenerateModalProps) {
+  const previewSrc = editor.previewImageBase64
+    ? `data:${editor.previewContentType ?? "image/jpeg"};base64,${editor.previewImageBase64}`
+    : "";
+
+  return (
+    <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
+      <div className="image-lightbox" style={{ maxWidth: 760 }}>
+        <div className="image-lightbox-head">
+          <div>
+            <div className="section-title">AI 生成替换</div>
+            <div className="section-subtitle">{editor.title}</div>
+          </div>
+          <button type="button" className="secondary compact-btn" disabled={busy} onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>provider</label>
+          <select
+            value={editor.provider}
+            disabled={busy}
+            onChange={(event) => onChange({ ...editor, provider: event.target.value })}
+          >
+            <option value="pollinations">pollinations</option>
+          </select>
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>prompt</label>
+          <textarea
+            value={editor.prompt}
+            disabled={busy}
+            rows={8}
+            onChange={(event) => onChange({
+              ...editor,
+              prompt: event.target.value,
+              previewImageBase64: undefined,
+              previewContentType: undefined,
+              previewMetadata: undefined,
+            })}
+          />
+          {previewSrc ? (
+            <img
+              src={previewSrc}
+              alt="AI 生成预览"
+              style={{
+                width: "100%",
+                maxHeight: 520,
+                objectFit: "contain",
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+              }}
+            />
+          ) : null}
+        </div>
+        <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+          <button type="button" className="secondary compact-btn" disabled={busy} onClick={onClose}>
+            取消
+          </button>
+          <button type="button" className="secondary compact-btn" disabled={busy} onClick={onGeneratePreview}>
+            {busy ? "生成中" : "生成预览"}
+          </button>
+          <button type="button" className="approve-btn compact-btn" disabled={busy || !previewSrc} onClick={onInsert}>
+            {busy ? "插入中" : "插入替换"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

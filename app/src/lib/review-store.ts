@@ -731,10 +731,15 @@ export function resolveReviewRelativePath(filePath: string): string {
 interface MutableImageEntry {
   image_path?: string;
   provider?: string;
+  mode?: string;
   query?: string;
+  prompt?: string;
   source_url?: string;
   creator?: string;
   license?: string;
+  model?: string;
+  width?: number;
+  height?: number;
 }
 
 interface ParsedImageItemId {
@@ -840,6 +845,73 @@ export async function replaceImageForReviewItem(
       ...item,
       status: "modified",
       notes: item.notes || "Replaced by reviewer upload",
+    };
+  });
+
+  const updated = await updateStageData(videoId, version, "images", {
+    artifact,
+    review: {
+      status: "in_review",
+      items: patchedItems,
+    },
+  });
+
+  return {
+    artifact: updated.artifact,
+    review: updated.review,
+    imagePath: relativeImagePath,
+  };
+}
+
+interface GeneratedImageMetadata {
+  provider: string;
+  mode: "generate";
+  prompt: string;
+  model?: string;
+  width?: number;
+  height?: number;
+  source_url?: string;
+  creator?: string;
+  license?: string;
+}
+
+export async function replaceImageWithGeneratedImageForReviewItem(
+  videoId: string,
+  version: string,
+  itemId: string,
+  imageData: Uint8Array,
+  metadata: GeneratedImageMetadata,
+): Promise<{ artifact: unknown; review: ReviewFile; imagePath: string }> {
+  const { artifact, review } = await getStageData(videoId, version, "images");
+  const entry = locateImageEntry(artifact, itemId);
+  const relativeImagePath = entry.image_path;
+  if (!relativeImagePath) {
+    throw new Error(`Image path missing for ${itemId}`);
+  }
+
+  const outputPath = resolveOutputImagePath(relativeImagePath);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, imageData);
+
+  entry.provider = metadata.provider;
+  entry.mode = metadata.mode;
+  entry.query = "";
+  entry.prompt = metadata.prompt;
+  entry.source_url = metadata.source_url ?? "";
+  entry.creator = metadata.creator ?? "ai_generated";
+  entry.license = metadata.license ?? "provider_terms";
+  entry.model = metadata.model;
+  entry.width = metadata.width;
+  entry.height = metadata.height;
+
+  const patchedItems: ReviewItem[] = review.items.map((item): ReviewItem => {
+    if (item.id !== itemId) {
+      return item;
+    }
+    return {
+      ...item,
+      status: "regenerated",
+      notes: item.notes || "Replaced by AI generation",
     };
   });
 

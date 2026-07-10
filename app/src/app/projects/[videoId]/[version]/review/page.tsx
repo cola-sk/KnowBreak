@@ -4,6 +4,7 @@ import {
 } from "@/components/production-review-client";
 import { ReviewUnavailable } from "@/components/review-unavailable";
 import { StageHeader } from "@/components/stage-header";
+import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
 import { getProductionReviewData } from "@/lib/review-store";
 
 interface Props {
@@ -13,7 +14,11 @@ interface Props {
 export default async function ProductionReviewPage({ params }: Props) {
   const { videoId, version } = await params;
   try {
-    const initial = (await getProductionReviewData(videoId, version)) as ProductionReviewPayload;
+    const [initial, profileBase, globalOverrides] = await Promise.all([
+      getProductionReviewData(videoId, version) as Promise<ProductionReviewPayload>,
+      readProfileBase(),
+      readProfileOverrides(),
+    ]);
     const reviewStatuses = Object.fromEntries(
       Object.entries(initial.reviews).map(([stage, review]) => [stage, review?.status]),
     );
@@ -26,7 +31,7 @@ export default async function ProductionReviewPage({ params }: Props) {
           active="review"
           reviewStatuses={reviewStatuses}
         />
-        <ProductionReviewClient initial={initial} />
+        <ProductionReviewClient initial={initial} profileBase={profileBase} globalOverrides={globalOverrides} />
       </main>
     );
   } catch (error) {

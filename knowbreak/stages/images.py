@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel, Field
 
+from ..capabilities.text_to_image import generate_text_to_image
 from ..config import Config
 from ..llm import LLM
 from ..models import Storyboards
@@ -130,6 +131,8 @@ def _active_providers(cfg: Config) -> list[str]:
                 providers.append(provider)
             else:
                 print("  - 跳过 Pixabay：未配置 PIXABAY_API_KEY")
+        elif provider == "pollinations":
+            providers.append(provider)
         else:
             print(f"  - 跳过未知图片 provider：{provider}")
     if not providers:
@@ -236,6 +239,8 @@ def _fetch_with_fallbacks(
                 meta = _fetch_pexels(cfg.pexels_api_key, query, out_path, used_source_urls)
             elif provider == "pixabay" and cfg.pixabay_api_key:
                 meta = _fetch_pixabay(cfg.pixabay_api_key, query, out_path, used_source_urls)
+            elif provider == "pollinations":
+                meta = _fetch_pollinations(cfg, query, out_path)
             else:
                 meta = None
 
@@ -290,6 +295,7 @@ def _fetch_pexels(
             img_data = img_resp.content
             out_path.write_bytes(img_data)
             return {
+                "mode": "search",
                 "source_url": source_url,
                 "creator": photo.get("photographer"),
                 "license": "Pexels License",
@@ -336,6 +342,7 @@ def _fetch_pixabay(
             img_resp.raise_for_status()
             out_path.write_bytes(img_resp.content)
             return {
+                "mode": "search",
                 "source_url": source_url,
                 "creator": hit.get("user"),
                 "license": "Pixabay Content License",
@@ -346,3 +353,13 @@ def _fetch_pixabay(
             print(f"  下载失败 [{query}]: {e!r}")
             continue
     return None
+
+
+def _fetch_pollinations(cfg: Config, prompt: str, out_path: Path) -> dict | None:
+    try:
+        generated = generate_text_to_image(cfg, prompt, provider="pollinations")
+        out_path.write_bytes(generated.content)
+        return generated.metadata
+    except Exception as e:
+        print(f"  Pollinations 生成失败 [{prompt}]: {e!r}")
+        return None

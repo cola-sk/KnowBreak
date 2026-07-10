@@ -1,25 +1,16 @@
-import { existsSync } from "node:fs";
-import fs from "node:fs/promises";
-import path from "node:path";
-
 import { StartForm } from "@/components/start-form";
-import { listWorkflows, resolveOutDir, resolveProjectRoot } from "@/lib/review-store";
+import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
+import { listWorkflows, resolveOutDir } from "@/lib/review-store";
+
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [workflows, outDir] = await Promise.all([listWorkflows(), resolveOutDir()]);
-
-  const overridesPath = path.join(
-    resolveProjectRoot(),
-    "profiles",
-    "serious_science",
-    "profile_overrides.json",
-  );
-  let globalOverrides: Record<string, any> = {};
-  try {
-    if (existsSync(overridesPath)) {
-      globalOverrides = JSON.parse(await fs.readFile(overridesPath, "utf-8"));
-    }
-  } catch {}
+  const [workflows, outDir, profileBase, globalOverrides] = await Promise.all([
+    listWorkflows(),
+    resolveOutDir(),
+    readProfileBase(),
+    readProfileOverrides(),
+  ]);
 
   return (
     <main className="shell">
@@ -31,7 +22,7 @@ export default async function HomePage() {
         </p>
       </div>
 
-      <StartForm workflows={workflows} globalOverrides={globalOverrides} />
+      <StartForm workflows={workflows} profileBase={profileBase} globalOverrides={globalOverrides} />
 
       <div className="footer-info">
         <span className="info-label">本地产出目录：</span>
@@ -40,4 +31,3 @@ export default async function HomePage() {
     </main>
   );
 }
-
