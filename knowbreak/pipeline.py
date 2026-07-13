@@ -103,6 +103,9 @@ def run_full(
 
     source_cache_dir = project_dir(cfg.out_dir, video_id) if resolved_version else None
     write_workflow_plan(workflow, profile_name=cfg.profile.name, output_dir=pdir)
+    console.print(f"[green]video_id[/] = {video_id}")
+    if resolved_version:
+        console.print(f"[green]version[/] = {resolved_version}")
 
     start_idx = 0 if start_from is None else workflow.steps.index(start_from)
     _run_workflow_steps(workflow, start_idx, source, cfg, pdir, source_cache_dir, topic=topic)

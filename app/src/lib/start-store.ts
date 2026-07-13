@@ -496,6 +496,7 @@ async function artifactExistsForJob(job: StartJob, artifact: string): Promise<bo
 const VIDEO_ID_RE = /video_id\s*=\s*([A-Za-z0-9._-]+)/;
 const VERSION_RE = /version\s*=\s*([A-Za-z0-9._-]+)/;
 const OUTPUT_DIR_RE = /产出目录:\s*(\S+)/;
+const REVIEW_URL_RE = /\/projects\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(?:script|storyboard|images|review)\b/;
 const START_STATUS_RE = /\[start:(succeeded|failed|canceled)\]\s*([^\n\r]*)/;
 
 export function parseRunIds(output: string): { videoId?: string; version?: string } {
@@ -514,6 +515,11 @@ export function parseRunIds(output: string): { videoId?: string; version?: strin
     const outputDir = path.normalize(dir[1]);
     result.version = result.version ?? path.basename(outputDir);
     result.videoId = result.videoId ?? path.basename(path.dirname(outputDir));
+  }
+  const reviewUrl = REVIEW_URL_RE.exec(clean);
+  if (reviewUrl) {
+    result.videoId = result.videoId ?? reviewUrl[1];
+    result.version = result.version ?? reviewUrl[2];
   }
   return result;
 }

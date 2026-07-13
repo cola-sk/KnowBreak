@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 
 import { NextResponse } from "next/server";
 
+import { buildRuntimeEnv } from "@/lib/runtime-env";
 import { listWorkflows, resolveProjectRoot } from "@/lib/review-store";
 import {
   type StartJob,
@@ -100,13 +101,15 @@ export async function POST(request: Request) {
     const logStream = createWriteStream(logPath, { flags: "a" });
     logStream.write(`$ uv ${args.map((arg) => JSON.stringify(arg)).join(" ")}\n\n`);
 
+    const projectRoot = resolveProjectRoot();
+    const childEnv = await buildRuntimeEnv(projectRoot, {
+      KB_REVIEW_AUTO_APPROVE: "0",
+      ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
+    });
+
     const child = spawn("uv", args, {
-      cwd: resolveProjectRoot(),
-      env: {
-        ...process.env,
-        KB_REVIEW_AUTO_APPROVE: "0",
-        ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
-      },
+      cwd: projectRoot,
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 

@@ -1,0 +1,50 @@
+id = "xiyuan"
+description = "主题 workflow：洗冤集录系列通用模版。输入任一明确的宋慈法医案例主题，生成悬疑口播、古法检验与现代科学解密的短视频。"
+
+steps = [
+  "topic_seed",
+  "script",
+  "script_review",
+  "storyboard",
+  "storyboard_review",
+  "images",
+  "tts",
+  "compose",
+]
+
+[capabilities.topic_seed]
+prompt = "prompts/topic_seed.md"
+params = { target_duration = "90" }
+inputs = []
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/topics/xiyuan/script.md"
+inputs = ["topics.json"]
+outputs = ["scripts.json"]
+
+[capabilities.script_review]
+inputs = ["scripts.json"]
+outputs = ["reviews/script_review.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/topics/xiyuan/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.storyboard_review]
+inputs = ["storyboards.json"]
+outputs = ["reviews/storyboard_review.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

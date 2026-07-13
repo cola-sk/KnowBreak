@@ -140,6 +140,8 @@ def _tts_speed() -> float:
 
 
 def load_config() -> Config:
+    # Web 服务进程可能持有启动时的旧 env；每次加载配置时让 .env 重新成为当前运行配置。
+    load_dotenv(override=True)
     project_root = Path(__file__).resolve().parent.parent
     profile = load_style_profile(
         project_root,

@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 
 import { NextResponse } from "next/server";
 
+import { buildRuntimeEnv } from "@/lib/runtime-env";
 import type { RegenerationJob } from "@/lib/types";
 import {
   getProductionReviewData,
@@ -378,13 +379,15 @@ export async function POST(
     logStream.write(commandLine);
     taskLogStream.write(commandLine);
 
+    const projectRoot = resolveProjectRoot();
+    const childEnv = await buildRuntimeEnv(projectRoot, {
+      KB_REVIEW_AUTO_APPROVE: "0",
+      ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
+    });
+
     const child = spawn("uv", args, {
-      cwd: resolveProjectRoot(),
-      env: {
-        ...process.env,
-        KB_REVIEW_AUTO_APPROVE: "0",
-        ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
-      },
+      cwd: projectRoot,
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
