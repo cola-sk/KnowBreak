@@ -76,6 +76,25 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
     tts_dir.mkdir(exist_ok=True)
     provider = _normalize_provider(cfg.tts.provider)
 
+    # 开启口播封面时，把空的 cover_narration 用 title+？ 兜底并写回 scripts.json
+    # 让 UI 能看到、能编辑；老视频重跑 tts 即可补上文案
+    if cfg.intro.cover_narration_enabled:
+        dirty = False
+        for script in scripts.scripts:
+            if (script.cover_narration or "").strip():
+                continue
+            t = (script.title or "").strip()
+            if not t:
+                continue
+            if not t.endswith(("？", "?", "！", "!")):
+                t = f"{t}？"
+            script.cover_narration = t
+            dirty = True
+        if dirty:
+            scripts_path.write_text(
+                scripts.model_dump_json(indent=2), encoding="utf-8"
+            )
+
     # Initialize cache under out_dir/.cache/tts
     cache_dir = cfg.out_dir / ".cache" / "tts"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -93,17 +112,55 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
         script_dir = tts_dir / str(script.topic_index)
         script_dir.mkdir(exist_ok=True)
 
+        # 封面口播（疑问句式读标题）：合成 cover.mp3，拼到 full.mp3 最前面
+        # 字段已在 run() 顶部按 cover_narration_enabled 兜底回写，这里只读
+        cover_narration = ""
+        if cfg.intro.cover_narration_enabled:
+            cover_narration = (getattr(script, "cover_narration", "") or "").strip()
+        cover_mp3: Path | None = None
+        cover_duration = 0.0
+        cover_audio_rel: str | None = None
+        if cover_narration:
+            cover_mp3 = script_dir / "cover.mp3"
+            prov_config = _get_tts_config_dict(cfg, provider)
+            cache_key = _get_hash(cover_narration, prov_config)
+            cached_item = cache_index.get(cache_key)
+            cached_file = cache_dir / f"{cache_key}.mp3"
+            if cached_item and cached_file.exists():
+                shutil.copy(cached_file, cover_mp3)
+                actual_provider = cached_item["actual_provider"]
+                cover_duration = cached_item["duration"]
+                print(f"  ✓ [TTS Cache Hit] cover: {actual_provider} (duration: {cover_duration}s)")
+            else:
+                actual_provider = _synth(cover_narration, cover_mp3, cfg, provider)
+                cover_duration = _probe_duration(cover_mp3)
+                shutil.copy(cover_mp3, cached_file)
+                cache_index[cache_key] = {
+                    "text": cover_narration,
+                    "requested_provider": provider,
+                    "actual_provider": actual_provider,
+                    "duration": cover_duration,
+                }
+                try:
+                    cache_index_path.write_text(
+                        json.dumps(cache_index, ensure_ascii=False, indent=2),
+                        encoding="utf-8"
+                    )
+                except Exception as e:
+                    print(f"  Warning: failed to save tts cache index: {e}")
+            cover_audio_rel = str(cover_mp3.relative_to(cfg.out_dir))
+
         line_audios: list[TTSLine] = []
         for i, line in enumerate(script.lines):
             mp3 = script_dir / f"line_{i:03d}.mp3"
-            
+
             # Compute cache key based on text and provider config
             prov_config = _get_tts_config_dict(cfg, provider)
             cache_key = _get_hash(line.text, prov_config)
-            
+
             cached_item = cache_index.get(cache_key)
             cached_file = cache_dir / f"{cache_key}.mp3"
-            
+
             if cached_item and cached_file.exists():
                 shutil.copy(cached_file, mp3)
                 actual_provider = cached_item["actual_provider"]
@@ -112,7 +169,7 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
             else:
                 actual_provider = _synth(line.text, mp3, cfg, provider)
                 dur = _probe_duration(mp3)
-                
+
                 # Copy to cache
                 shutil.copy(mp3, cached_file)
                 # Update index
@@ -138,7 +195,8 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
             ))
 
         full_mp3 = script_dir / "full.mp3"
-        _concat_mp3([la.audio_path for la in line_audios], full_mp3, cfg.out_dir)
+        concat_inputs = ([cover_audio_rel] if cover_audio_rel else []) + [la.audio_path for la in line_audios]
+        _concat_mp3(concat_inputs, full_mp3, cfg.out_dir)
         full_dur = _probe_duration(full_mp3)
 
         result_scripts.append(TTSScript(
@@ -147,6 +205,8 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
             lines=line_audios,
             full_audio_path=str(full_mp3.relative_to(cfg.out_dir)),
             total_duration=full_dur,
+            cover_audio_path=cover_audio_rel,
+            cover_duration=cover_duration,
         ))
 
     result = TTSResult(video_id=scripts.video_id, scripts=result_scripts)

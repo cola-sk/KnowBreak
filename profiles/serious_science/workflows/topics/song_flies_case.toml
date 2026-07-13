@@ -1,0 +1,39 @@
+id = "song_flies_case"
+description = "主题绑定 workflow：宋慈洗冤录之染血的镰刀（苍蝇验尸案）。固定 topic/hook/angle 参数，将 script 阶段重定向到专属 prompt。"
+
+steps = [
+  "topic_seed",
+  "script",
+  "storyboard",
+  "images",
+  "tts",
+  "compose",
+]
+
+[capabilities.topic_seed]
+params = { topic = "宋慈洗冤录之染血的镰刀", hook = "杀人犯把刀洗得锃亮自以为天衣无缝，却被几百只飞虫当场指认！", angle = "从麦田命案的月牙形伤口切入，展现宋慈让村民亮刀、苍蝇指认凶器的传奇侦破过程，并科普现代法医昆虫学原理。", target_duration = "90" }
+inputs = []
+outputs = ["topics.json"]
+
+[capabilities.script]
+prompt = "prompts/topics/song_flies_case/script.md"
+inputs = ["topics.json"]
+outputs = ["scripts.json"]
+
+[capabilities.storyboard]
+prompt = "prompts/storyboard.md"
+inputs = ["scripts.json"]
+outputs = ["storyboards.json"]
+
+[capabilities.images]
+prompt = "prompts/images.md"
+inputs = ["storyboards.json"]
+outputs = ["images.json", "images/"]
+
+[capabilities.tts]
+inputs = ["scripts.json"]
+outputs = ["tts.json", "tts/"]
+
+[capabilities.compose]
+inputs = ["tts.json", "images.json"]
+outputs = ["compose.json", "compose/"]

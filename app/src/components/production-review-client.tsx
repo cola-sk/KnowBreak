@@ -14,6 +14,7 @@ interface ScriptLine {
 interface ScriptItem {
   topic_index: number;
   title: string;
+  cover_narration?: string;
   lines: ScriptLine[];
   total_duration?: number;
   hashtags?: string[];
@@ -260,6 +261,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
   const [activeJobDetail, setActiveJobDetail] = useState<RegenerationJobDetail | null>(null);
   const [showJobLog, setShowJobLog] = useState(false);
   const [jobNotice, setJobNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
   const previousJobRef = useRef<{ id: string; status: RegenerationJob["status"] } | null>(null);
 
   // Project overrides state
@@ -313,6 +315,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
       setSource(payload.source);
       setWorkflow(payload.workflow);
       setLastRefreshedAt(new Date().toISOString());
+      setIsDirty(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "刷新失败");
     } finally {
@@ -477,6 +480,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
   }, [data.job, data.version]);
 
   const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
+    setIsDirty(true);
     setData((prev) => {
       if (!prev.artifacts.script) {
         return prev;
@@ -506,7 +510,27 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     });
   };
 
+  const updateScriptCoverNarration = (value: string) => {
+    setIsDirty(true);
+    setData((prev) => {
+      if (!prev.artifacts.script) {
+        return prev;
+      }
+      const scripts = prev.artifacts.script.scripts.map((script) => {
+        if (script.topic_index !== topicIndex) {
+          return script;
+        }
+        return { ...script, cover_narration: value };
+      });
+      return {
+        ...prev,
+        artifacts: { ...prev.artifacts, script: { ...prev.artifacts.script, scripts } },
+      };
+    });
+  };
+
   const updateShot = (shotIndex: number, key: keyof Shot, value: string) => {
+    setIsDirty(true);
     setData((prev) => {
       if (!prev.artifacts.storyboard) {
         return prev;
@@ -542,6 +566,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     key: keyof ImageEntry,
     value: string,
   ) => {
+    setIsDirty(true);
     setData((prev) => {
       if (!prev.artifacts.images) {
         return prev;
@@ -565,6 +590,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
   };
 
   const deleteImage = (kind: "cover" | "shot", shotIndex: number | undefined) => {
+    setIsDirty(true);
     setData((prev) => {
       if (!prev.artifacts.images) {
         return prev;
@@ -656,11 +682,21 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     setMessage("");
     try {
       await persistEdits();
-      setMessage("已保存文案、分镜和图片信息。需要更新 MP4 时请选择阶段并点击重生成。");
+      setMessage("已保存所有页面的修改。需要更新 MP4 时请选择阶段并点击重生成。");
+      setIsDirty(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const discardAll = () => {
+    if (window.confirm("确定要放弃所有未保存的修改吗？")) {
+      setData(initial);
+      setProjectOverrides(initial.projectOverrides ?? {});
+      setIsDirty(false);
+      setMessage("已放弃所有未保存的修改");
     }
   };
 
@@ -812,6 +848,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     try {
       if (saveBeforeRun) {
         await persistEdits();
+        setIsDirty(false);
       }
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/regenerate`, {
         method: "POST",
@@ -914,15 +951,9 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
         </section>
 
         <section className="panel" style={{ padding: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 18 }}>表单保存与 MP4 重生成</div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>MP4 视频重生成</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
-            保存只写入本页表单里的脚本、分镜和图片元数据；上传图片、粘贴图片、AI 插入替换会立即写入本地文件和审核数据。
-          </div>
-
-          <div className="row" style={{ marginTop: 12 }}>
-            <button className="secondary" disabled={saving || regenerating} onClick={saveAll}>
-              {saving ? "保存中..." : "保存表单修改"}
-            </button>
+            配置重生成参数并合成新的 MP4 视频。
           </div>
 
           <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
@@ -973,7 +1004,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
             </div>
             <div className="row">
               <button className="primary-btn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
-                {saving || regenerating ? "处理中..." : "保存表单修改并重生成 MP4"}
+                {saving || regenerating ? "处理中..." : "保存表单并重生成"}
               </button>
               <button className="secondary" disabled={saving || regenerating} onClick={() => regenerate(false)}>
                 直接重生成 MP4
@@ -1012,8 +1043,43 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
       </div>
 
       <section className="panel" style={{ padding: 16 }}>
-        <div style={{ fontWeight: 700, fontSize: 18 }}>
-          #{topicIndex} {selectedScript?.title ?? selectedStoryboard?.title ?? selectedImages?.title ?? "未命名"}
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 16, borderBottom: "1px solid var(--line)", paddingBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>
+            #{topicIndex} {selectedScript?.title ?? selectedStoryboard?.title ?? selectedImages?.title ?? "未命名"}
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            {isDirty ? (
+              <span style={{ fontSize: 13, color: "var(--warning)", marginRight: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "var(--warning)", display: "inline-block" }}></span>
+                有未保存的修改
+              </span>
+            ) : (
+              <span style={{ fontSize: 13, color: "var(--success)", marginRight: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "var(--success)", display: "inline-block" }}></span>
+                修改已保存
+              </span>
+            )}
+            <button
+              type="button"
+              className={isDirty ? "primary-btn" : "secondary"}
+              disabled={saving || regenerating}
+              onClick={saveAll}
+              style={{ padding: "6px 14px", fontSize: 13 }}
+            >
+              {saving ? "保存中..." : "保存全部修改 (所有 Topic)"}
+            </button>
+            {isDirty ? (
+              <button
+                type="button"
+                className="secondary"
+                disabled={saving || regenerating}
+                onClick={discardAll}
+                style={{ padding: "6px 14px", fontSize: 13, color: "var(--danger)" }}
+              >
+                放弃修改
+              </button>
+            ) : null}
+          </div>
         </div>
         <GroupedTopicEditor
           script={selectedScript}
@@ -1023,6 +1089,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
           replacingItemId={replacingItemId}
           generatingItemId={generatingItemId}
           onScriptChange={updateScriptLine}
+          onScriptCoverNarrationChange={updateScriptCoverNarration}
           onShotChange={updateShot}
           onImageChange={updateImage}
           onImageReplace={openEditorForFile}
@@ -1083,6 +1150,7 @@ function GroupedTopicEditor({
   replacingItemId,
   generatingItemId,
   onScriptChange,
+  onScriptCoverNarrationChange,
   onShotChange,
   onImageChange,
   onImageReplace,
@@ -1097,6 +1165,7 @@ function GroupedTopicEditor({
   replacingItemId: string | null;
   generatingItemId: string | null;
   onScriptChange: (lineIndex: number, key: keyof ScriptLine, value: string) => void;
+  onScriptCoverNarrationChange: (value: string) => void;
   onShotChange: (shotIndex: number, key: keyof Shot, value: string) => void;
   onImageChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
   onImageReplace: (itemId: string, title: string, file: File) => void;
@@ -1142,17 +1211,29 @@ function GroupedTopicEditor({
               onZoom={(src) => onImageZoom("封面图片", src)}
             />
           </div>
-          <div className="field-group">
-            <details className="image-meta-details" open>
-              <summary className="field-group-title">封面图片信息</summary>
-            <ImageMetaEditor
-              title="cover"
-              image={images.cover}
-              imageToken={imageToken}
-              compact
-              onChange={(key, value) => onImageChange("cover", undefined, key, value)}
-            />
-            </details>
+          <div className="shot-fields">
+            {script ? (
+              <div className="field-group">
+                <div className="field-group-title">口播文案</div>
+                <FieldTextarea
+                  label="cover_narration（朗读标题，疑问句式；留空则 tts 阶段用标题+？兜底）"
+                  value={script.cover_narration ?? ""}
+                  onChange={(value) => onScriptCoverNarrationChange(value)}
+                />
+              </div>
+            ) : null}
+            <div className="field-group">
+              <details className="image-meta-details" open>
+                <summary className="field-group-title">封面图片信息</summary>
+              <ImageMetaEditor
+                title="cover"
+                image={images.cover}
+                imageToken={imageToken}
+                compact
+                onChange={(key, value) => onImageChange("cover", undefined, key, value)}
+              />
+              </details>
+            </div>
           </div>
         </div>
       ) : null}

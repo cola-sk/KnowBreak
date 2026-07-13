@@ -29,6 +29,7 @@ export const PROFILE_DEFAULTS: FieldGroup[] = [
     fields: [
       { key: "intro.enabled", label: "片头启用", kind: "bool", default: true },
       { key: "intro.duration", label: "片头时长(秒)", kind: "float", default: 2.0 },
+      { key: "intro.cover_narration_enabled", label: "封面朗读标题", kind: "bool", default: true },
       { key: "topics.count", label: "选题数量", kind: "int", default: 1 },
       { key: "topics.target_duration_min", label: "选题目标最短(秒)", kind: "int", default: 60 },
       { key: "topics.target_duration_max", label: "选题目标最长(秒)", kind: "int", default: 90 },

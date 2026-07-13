@@ -41,6 +41,7 @@ class IntroProfile(BaseModel):
 
     enabled: bool = True
     duration: float = 2.0
+    cover_narration_enabled: bool = True  # 封面帧是否朗读标题口播（False = 静默封面）
 
 
 class TopicsProfile(BaseModel):

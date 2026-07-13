@@ -255,6 +255,7 @@ def artifact_path(video_id: str, stage: str, cfg: Config, version: str | None = 
         "asr": pdir / "transcript.json",
         "extract": pdir / "knowledge.json",
         "topics": pdir / "topics.json",
+        "topic_seed": pdir / "topics.json",
         "rewrite": pdir / "scripts.json",
         "script": pdir / "scripts.json",
         "script_review": pdir / "reviews" / "script_review.json",

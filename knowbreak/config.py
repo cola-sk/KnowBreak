@@ -64,6 +64,7 @@ class TTSConfig:
 class IntroConfig:
     enabled: bool = True
     duration: float = 2.0
+    cover_narration_enabled: bool = True  # 封面帧是否朗读标题口播
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,7 @@ def load_config() -> Config:
         intro=IntroConfig(
             enabled=profile.intro.enabled,
             duration=profile.intro.duration,
+            cover_narration_enabled=profile.intro.cover_narration_enabled,
         ),
         profile=profile,
         out_dir=Path(_env("KB_OUT_DIR", "./out")).resolve(),

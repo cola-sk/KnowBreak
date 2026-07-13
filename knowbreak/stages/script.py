@@ -22,8 +22,19 @@ class _LineItem(BaseModel):
 
 
 class _ScriptSchema(BaseModel):
+    cover_narration: str = ""  # 封面口播：疑问句式读标题，10-20 字
     lines: list[_LineItem]
     hashtags: list[str] = []
+
+
+def _fallback_cover_narration(title: str) -> str:
+    """LLM 没给 cover_narration 时，用标题兜底：确保以疑问语气收尾。"""
+    t = title.strip()
+    if not t:
+        return ""
+    if not t.endswith(("？", "?", "！", "!")):
+        t = f"{t}？"
+    return t
 
 
 def run(topics_path: Path, cfg: Config, *, prompt: str | None = None) -> Scripts:
@@ -47,15 +58,17 @@ def run(topics_path: Path, cfg: Config, *, prompt: str | None = None) -> Scripts
             )
         schema = llm.chat_json(
             system_prompt,
-            f"选题标题：{topic.title}\n钩子方向：{topic.hook}\n切入角度：{topic.angle}\n目标时长：{topic.target_duration}s\n参考知识点：\n{points_blob}\n",
+            f"选题标题：{topic.title}\n钩子方向：{topic.hook}\n切入角度：{topic.angle}\n目标时长：{topic.target_duration}s\n参考知识点：\n{points_blob}\n\n额外要求：在 cover_narration 字段给出一行封面口播——以疑问句式重写或强化标题（如「为什么台风总在夏天生成？」），10-20 字，用于封面帧 TTS 朗读，吸引人且不与正文首句重复。",
             _ScriptSchema,
             temperature=cfg.profile.generation.script_temperature,
         )
+        cover_narration = (schema.cover_narration or "").strip() or _fallback_cover_narration(topic.title)
         total = sum(line.estimated_seconds for line in schema.lines)
         scripts.append(
             Script(
                 topic_index=topic.index,
                 title=topic.title,
+                cover_narration=cover_narration,
                 lines=[
                     ScriptLine(text=line.text, estimated_seconds=line.estimated_seconds)
                     for line in schema.lines

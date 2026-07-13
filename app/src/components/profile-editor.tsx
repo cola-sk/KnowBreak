@@ -139,6 +139,7 @@ const DEFAULT_PARAM_SECTIONS = [
     fields: fields([
       "intro.enabled",
       "intro.duration",
+      "intro.cover_narration_enabled",
       "topics.count",
       "topics.target_duration_min",
       "topics.target_duration_max",

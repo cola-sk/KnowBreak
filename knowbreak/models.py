@@ -67,6 +67,7 @@ class ScriptLine(BaseModel):
 class Script(BaseModel):
     topic_index: int
     title: str
+    cover_narration: str = ""  # 封面口播：用于封面帧 TTS，疑问句式读标题
     lines: list[ScriptLine]
     total_duration: float  # 估算总时长
     hashtags: list[str] = Field(default_factory=list)
@@ -128,6 +129,8 @@ class TTSScript(BaseModel):
     lines: list[TTSLine]
     full_audio_path: str  # 拼接后的完整音频
     total_duration: float
+    cover_audio_path: str | None = None  # 封面口播音频，已拼到 full_audio_path 最前面
+    cover_duration: float = 0.0  # 封面口播时长
 
 
 class TTSResult(BaseModel):

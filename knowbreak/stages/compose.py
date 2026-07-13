@@ -51,6 +51,12 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
         )
         durations = _line_durations(script_dir)
         intro_duration = cfg.intro.duration if cfg.intro.enabled else 0.0
+        # 有封面口播 TTS 时：封面帧时长 = cover 时长，音频无延迟（开头即封面口播）
+        # 无封面口播（老数据）：封面静默 cfg.intro.duration 秒，正文 TTS 延后
+        has_cover_audio = bool(script.cover_audio_path) and script.cover_duration > 0
+        audio_delay = 0.0 if has_cover_audio else intro_duration
+        if has_cover_audio:
+            intro_duration = script.cover_duration
         intro_image = None
         if intro_duration > 0:
             intro_image = _render_intro_image(script_dir, script.title, cover_img, cfg.profile.compose)
@@ -58,7 +64,7 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
             durations.insert(0, intro_duration)
         mp4_path = compose_dir / f"{script.topic_index}.mp4"
         audio_path = cfg.out_dir / script.full_audio_path
-        _render_video(script_dir, images, durations, audio_path, mp4_path, intro_duration)
+        _render_video(script_dir, images, durations, audio_path, mp4_path, audio_delay)
 
         # 清理中间 PNG
         for img in images:
