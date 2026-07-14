@@ -873,28 +873,29 @@ a.tab.active {
 }
 
 .config-category-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: flex-end;
-  width: 100%;
-  padding: 0;
-  border-bottom: 1px solid var(--panel-border);
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  background: light-dark(#f1f5f9, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  width: auto;
+  align-self: flex-start;
+  margin-bottom: 6px;
 }
 
 .config-category-tabs button {
-  min-height: 38px;
-  padding: 8px 12px 10px;
+  min-height: 32px;
+  padding: 6px 16px;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: 7px;
   background: transparent;
   color: var(--muted);
   box-shadow: none;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
-  margin-bottom: -1px;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .config-category-tabs button:hover {
@@ -902,10 +903,9 @@ a.tab.active {
 }
 
 .config-category-tabs button.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  background: transparent;
-  box-shadow: none;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
 }
 
 .visual-config-grid {

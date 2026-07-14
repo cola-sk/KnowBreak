@@ -1163,12 +1163,17 @@ function FieldRow({ spec, value, effectiveValue, onChange, onClear }: FieldRowPr
             <code>{spec.key}</code> · {currentHint}{spec.hint ? ` · ${spec.hint}` : ""}
           </div>
         </div>
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(event) => onChange(event.target.checked)}
-          style={{ width: "auto" }}
-        />
+        <select
+          value={checked ? "true" : "false"}
+          onChange={(event) => {
+            const raw = event.target.value;
+            onChange(raw === "true");
+          }}
+          style={{ width: 180 }}
+        >
+          <option value="true">是</option>
+          <option value="false">否</option>
+        </select>
         {isOverridden ? <button className="tab " onClick={onClear}>清除修改</button> : <span style={{ width: 72 }} />}
       </div>
     );
