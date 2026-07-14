@@ -30,7 +30,7 @@
 
 - 每个 visual 都要包含：时代氛围、地点、主体动作、镜头距离。
 - 优先使用这些镜头词：远景交代现场、中景看人物反应、近景看证据、特写看细节、俯拍看排列、逆光看气氛。
-- broll 要具体可搜索，例如“ancient Chinese court documents, Song dynasty yamen desk, wheat field crime scene reenactment, old sickle close up, forensic evidence illustration”。
+- broll 要具体可搜索，当涉及人物动作时，应明确指定主体为宋慈（Forensic detective Song Ci），描述其具体神态与检验动作（如：Song Ci frowning, crouched down, carefully inspecting details of the bone, close-up of Song Ci's hands holding a red umbrella）。
 - subtitle 要短，像悬疑章节标题，不要把 narration 全塞进去。
 - subtitle 要帮助制造疑问，例如“伤口不对”“所有人都看错了”“宋慈只等太阳”“证据开始动了”，不要一开始就写“真相是血迹残留”。
 - 避免 generic science infographic、doctor laboratory、modern police、western medieval court、random microscope 这类出戏画面，除非真相揭底段确实需要极短的现代机制辅助。

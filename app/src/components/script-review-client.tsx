@@ -127,16 +127,31 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(
+      // 先把本地编辑过的 artifact 落盘，避免直接 approve 丢内容
+      const saveResponse = await fetch(`/api/projects/${videoId}/${version}/script`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifact: data.artifact,
+          review: { status: "in_review" },
+        }),
+      });
+      const saved = (await saveResponse.json()) as ScriptReviewPayload | { error: string };
+      if (!saveResponse.ok) {
+        throw new Error("error" in saved ? saved.error : "保存失败");
+      }
+      const savedPayload = saved as ScriptReviewPayload;
+
+      const approveResponse = await fetch(
         `/api/projects/${videoId}/${version}/reviews/script_review/approve`,
         { method: "POST" },
       );
-      const result = (await response.json()) as { review?: ReviewFile; error?: string };
-      if (!response.ok || !result.review) {
+      const result = (await approveResponse.json()) as { review?: ReviewFile; error?: string };
+      if (!approveResponse.ok || !result.review) {
         throw new Error(result.error ?? "通过失败");
       }
-      setData((prev) => ({ ...prev, review: result.review! }));
-      setMessage("脚本审核已通过。你可以进入分镜审核阶段。");
+      setData({ ...savedPayload, review: result.review });
+      setMessage("脚本已保存并审核通过。你可以进入分镜审核阶段。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "通过失败");
     } finally {

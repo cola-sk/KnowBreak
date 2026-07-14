@@ -73,12 +73,14 @@ def run(
                 kws = kw_map.get(shot.index, [])
                 query = " ".join(kws[:2]) if kws else shot.broll[:60]
                 img_path = topic_dir / f"shot_{shot.index:03d}.jpg"
+                gen_prompt = _build_enhanced_gen_prompt(board.title, shot)
                 meta = _fetch_with_fallbacks(
                     cfg,
                     providers,
                     [query, shot.broll[:60]],
                     img_path,
                     used_source_urls,
+                    gen_prompt=gen_prompt,
                 )
                 if meta:
                     shot_images.append({
@@ -175,12 +177,14 @@ def _fetch_cover_image(
     query = " ".join(cover_keywords[:3]) if cover_keywords else board.title
     first_broll = board.shots[0].broll if board.shots else ""
     cover_path = topic_dir / "cover.jpg"
+    cover_gen_prompt = _build_cover_gen_prompt(board.title, board.shots[0] if board.shots else None)
     meta = _fetch_with_fallbacks(
         cfg,
         _cover_provider_order(providers),
         [query, first_broll, board.title],
         cover_path,
         used_source_urls,
+        gen_prompt=cover_gen_prompt,
     )
     if meta:
         print(f"  ✓ topic {board.topic_index} cover: {meta['provider']} / {meta['query']}")
@@ -203,6 +207,8 @@ def _fetch_with_fallbacks(
     queries: list[str],
     out_path: Path,
     used_source_urls: set[str],
+    *,
+    gen_prompt: str | None = None,
 ) -> dict | None:
     import hashlib
     import shutil
@@ -223,13 +229,19 @@ def _fetch_with_fallbacks(
     seen: set[tuple[str, str]] = set()
     for query in [q.strip() for q in queries if q.strip()]:
         for provider in providers:
-            key = (provider, query)
+            # Resolve actual prompt to use for generation or search
+            if provider in {"pollinations", "cloudflare_workers", "huggingface"}:
+                prompt_to_use = gen_prompt or query
+            else:
+                prompt_to_use = query
+
+            key = (provider, prompt_to_use)
             if key in seen:
                 continue
             seen.add(key)
 
-            # Compute cache key based on provider and query
-            cache_key = hashlib.sha256(f"{provider}:{query}".encode("utf-8")).hexdigest()
+            # Compute cache key based on provider and prompt_to_use
+            cache_key = hashlib.sha256(f"{provider}:{prompt_to_use}".encode("utf-8")).hexdigest()
             cached_item = cache_index.get(cache_key)
             cached_file = cache_dir / f"{cache_key}.jpg"
 
@@ -241,16 +253,16 @@ def _fetch_with_fallbacks(
                     shutil.copy(cached_file, out_path)
                     if source_url:
                         used_source_urls.add(source_url)
-                    print(f"    ✓ [Image Cache Hit] {provider} / {query}")
-                    return {"provider": provider, "query": query, **cached_item}
+                    print(f"    ✓ [Image Cache Hit] {provider} / {prompt_to_use}")
+                    return {"provider": provider, "query": prompt_to_use, **cached_item}
 
             # Cache miss, fetch normally
             if provider == "pexels" and cfg.pexels_api_key:
-                meta = _fetch_pexels(cfg.pexels_api_key, query, out_path, used_source_urls)
+                meta = _fetch_pexels(cfg.pexels_api_key, prompt_to_use, out_path, used_source_urls)
             elif provider == "pixabay" and cfg.pixabay_api_key:
-                meta = _fetch_pixabay(cfg.pixabay_api_key, query, out_path, used_source_urls)
+                meta = _fetch_pixabay(cfg.pixabay_api_key, prompt_to_use, out_path, used_source_urls)
             elif provider in {"pollinations", "cloudflare_workers", "huggingface"}:
-                meta = _fetch_generated_image(cfg, provider, query, out_path)
+                meta = _fetch_generated_image(cfg, provider, prompt_to_use, out_path)
             else:
                 meta = None
 
@@ -271,7 +283,7 @@ def _fetch_with_fallbacks(
                 except Exception as e:
                     print(f"  Warning: failed to save image cache index: {e}")
 
-                return {"provider": provider, "query": query, **meta}
+                return {"provider": provider, "query": prompt_to_use, **meta}
     return None
 
 
@@ -373,3 +385,47 @@ def _fetch_generated_image(cfg: Config, provider: str, prompt: str, out_path: Pa
     except Exception as e:
         print(f"  {provider} 生成失败 [{prompt}]: {e!r}")
         return None
+
+
+def _build_enhanced_gen_prompt(title: str, shot) -> str:
+    # Use the rich shot.broll as the primary descriptive prompt for AI generation.
+    prompt_base = shot.broll.strip() if shot.broll else ""
+    if not prompt_base or len(prompt_base) < 10:
+        # Fallback to visual description if broll is empty/short
+        prompt_base = f"A scene depicting: {shot.visual}"
+    
+    # Analyze topic title and prompt_base to determine the target style
+    title_lower = title.lower()
+    prompt_lower = prompt_base.lower()
+    
+    historical_keywords = ["宋慈", "song ci", "洗冤集录", "xiyuan", "朱元璋", "zhu yuanzhang", "明朝", "ming dynasty", "宋代", "song dynasty", "古代", "ancient china", "ancient chinese"]
+    is_historical = any(k in title_lower or k in prompt_lower for k in historical_keywords)
+    
+    if is_historical:
+        # Enhance for historical Chinese drama style (consistent lighting, cinematic look)
+        style_suffix = ", historical Chinese drama setting, realistic cinematography, dramatic lighting, detailed costumes and textures, muted historical color palette, 8k resolution, 9:16 aspect ratio"
+    else:
+        # Enhance for modern/scientific topics
+        style_suffix = ", clean modern style, highly detailed digital concept art, vibrant and harmonious color palette, 8k resolution, 9:16 aspect ratio"
+        
+    return f"{prompt_base}{style_suffix}"
+
+
+def _build_cover_gen_prompt(title: str, first_shot) -> str:
+    # Covers need extra dramatic impact
+    prompt_base = first_shot.broll.strip() if first_shot and first_shot.broll else title
+    if not prompt_base or len(prompt_base) < 10:
+        prompt_base = title
+        
+    title_lower = title.lower()
+    prompt_lower = prompt_base.lower()
+    
+    historical_keywords = ["宋慈", "song ci", "洗冤集录", "xiyuan", "朱元璋", "zhu yuanzhang", "明朝", "ming dynasty", "宋代", "song dynasty", "古代", "ancient china", "ancient chinese"]
+    is_historical = any(k in title_lower or k in prompt_lower for k in historical_keywords)
+    
+    if is_historical:
+        style_suffix = ", epic historical Chinese movie poster, striking composition, dramatic lighting, rich textures, masterpieces, 8k resolution, photorealistic, 9:16 aspect ratio"
+    else:
+        style_suffix = ", eye-catching modern poster design, vivid contrast, professional digital illustration, epic composition, 8k resolution, 9:16 aspect ratio"
+        
+    return f"{prompt_base}{style_suffix}"
