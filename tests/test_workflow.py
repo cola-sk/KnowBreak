@@ -19,7 +19,7 @@ def test_load_rewrite_workflow() -> None:
 def test_write_workflow_plan(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parent.parent
     profile_dir = project_root / "profiles" / "serious_science"
-    workflow = load_workflow(profile_dir, "serious_science_one")
+    workflow = load_workflow(profile_dir, "custom/serious_science_one")
 
     write_workflow_plan(workflow, profile_name="serious_science", output_dir=tmp_path)
 

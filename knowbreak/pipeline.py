@@ -46,7 +46,7 @@ STAGES = [
 ]
 SHARED_STAGES: set[str] = set()
 VersionMode = Literal["legacy", "create", "update"]
-DEFAULT_WORKFLOW = "serious_science_one"
+DEFAULT_WORKFLOW = "custom/serious_science_one"
 
 
 def run_full(

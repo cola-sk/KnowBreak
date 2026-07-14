@@ -628,7 +628,7 @@ export async function getVersionStartPreset(
     input: sourceToStartInput(source),
     source,
     workflow: await resolveWorkflowCliName(
-      workflowPlan?.workflow ?? "serious_science_one",
+      workflowPlan?.workflow ?? "custom/serious_science_one",
       workflowPlan?.profile ?? "serious_science",
     ),
     title: await inferVersionTitle(versionDir),
@@ -669,7 +669,7 @@ export async function getProductionReviewData(
     versionDir,
     source: await inferRegenerationSource(versionDir),
     workflow: await resolveWorkflowCliName(
-      workflowPlan?.workflow ?? "serious_science_one",
+      workflowPlan?.workflow ?? "custom/serious_science_one",
       workflowPlan?.profile ?? "serious_science",
     ),
     workflowSteps: workflowPlan?.steps?.map((step) => step.capability).filter(Boolean) as string[] ?? [],

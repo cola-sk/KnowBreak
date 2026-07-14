@@ -1,4 +1,4 @@
-id = "serious_science_one"
+id = "严肃科普（一条视频）"
 description = "严肃科普提炼：重新提炼知识点，生成 1 条原创短视频。"
 
 steps = [

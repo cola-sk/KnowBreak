@@ -40,7 +40,7 @@ def run(
     workflow: str = typer.Option(
         DEFAULT_WORKFLOW,
         "--workflow",
-        help="配置式 workflow 名称，例如 serious_science_one / rewrite_same_structure / topic_seed / ming_plague",
+        help="配置式 workflow 名称，例如 custom/serious_science_one / rewrite_same_structure / topic_seed / topics/ming_plague",
     ),
     topic: str = typer.Option(
         None,

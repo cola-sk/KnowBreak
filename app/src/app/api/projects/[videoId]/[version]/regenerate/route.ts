@@ -267,7 +267,7 @@ export async function POST(
     const rawSource = (body.source?.trim() || currentData.source).trim();
     const source = normalizeSource(rawSource);
     const workflow = await resolveWorkflowCliName(
-      (body.workflow?.trim() || currentData.workflow || "serious_science_one").trim(),
+      (body.workflow?.trim() || currentData.workflow || "custom/serious_science_one").trim(),
     );
 
     validateWorkflowName(workflow);

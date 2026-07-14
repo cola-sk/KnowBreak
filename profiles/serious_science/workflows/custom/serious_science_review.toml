@@ -1,4 +1,4 @@
-id = "serious_science_review"
+id = "严肃科普（审核）"
 description = "严肃科普提炼（含人工审核闸门）：脚本/分镜/图片分别审核后再继续。"
 
 steps = [
