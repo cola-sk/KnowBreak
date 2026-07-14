@@ -261,12 +261,17 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
               ? "prompt"
               : "fallback";
     const initialPrompt = sources[defaultSource] || "";
+    const savedProvider = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_provider") : null;
+    const savedModel = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_model") : null;
+    const provider = savedProvider || "pollinations";
+    const model = savedModel !== null ? savedModel : defaultModelForProvider(provider);
+
     setGenerateEditor({
       itemId,
       title,
       prompt: initialPrompt,
-      provider: "pollinations",
-      model: defaultModelForProvider("pollinations"),
+      provider,
+      model,
       promptSource: defaultSource,
       sources,
       useContextPrompt: true,
@@ -884,10 +889,15 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
               disabled={busy}
               onChange={(event) => {
                 const provider = event.target.value;
+                const model = defaultModelForProvider(provider);
+                if (typeof window !== "undefined") {
+                  window.localStorage.setItem("kb_last_image_provider", provider);
+                  window.localStorage.setItem("kb_last_image_model", model);
+                }
                 onChange({
                   ...editor,
                   provider,
-                  model: defaultModelForProvider(provider),
+                  model,
                   previewImageBase64: undefined,
                   previewContentType: undefined,
                   previewMetadata: undefined,
@@ -907,13 +917,19 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
               value={editor.model}
               disabled={busy}
               placeholder="使用 provider 默认模型"
-              onChange={(event) => onChange({
-                ...editor,
-                model: event.target.value,
-                previewImageBase64: undefined,
-                previewContentType: undefined,
-                previewMetadata: undefined,
-              })}
+              onChange={(event) => {
+                const model = event.target.value;
+                if (typeof window !== "undefined") {
+                  window.localStorage.setItem("kb_last_image_model", model);
+                }
+                onChange({
+                  ...editor,
+                  model,
+                  previewImageBase64: undefined,
+                  previewContentType: undefined,
+                  previewMetadata: undefined,
+                });
+              }}
             />
           </div>
           <div className="form-row">

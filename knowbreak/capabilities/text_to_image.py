@@ -159,7 +159,15 @@ def _generate_huggingface(
         },
         timeout=120,
     )
-    r.raise_for_status()
+    if r.status_code != 200:
+        err_msg = f"Hugging Face image generation failed: {r.status_code}"
+        try:
+            payload = r.json()
+            if isinstance(payload, dict) and "error" in payload:
+                err_msg = f"Hugging Face error ({r.status_code}): {payload['error']}"
+        except Exception:
+            pass
+        raise RuntimeError(err_msg)
     content_type = r.headers.get("content-type", "")
     if not content_type.startswith("image/"):
         detail = r.text[:300]

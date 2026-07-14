@@ -27,10 +27,12 @@ MIN_DIM = 1080  # 至少 1080px 宽
 class _ShotKw(BaseModel):
     index: int
     keywords: list[str]
+    generation_prompt: str = Field(default="")
 
 
 class _Schema(BaseModel):
     cover_keywords: list[str] = Field(default_factory=list)
+    cover_generation_prompt: str = Field(default="")
     shots: list[_ShotKw]
 
 
@@ -58,13 +60,16 @@ def run(
     for board in boards.storyboards:
         if only_topic is not None and board.topic_index != only_topic:
             continue
-        cover_keywords, kw_map = _keywords_for_board(cfg, llm, board, prompt=prompt) if llm else ([], {})
+        if llm:
+            cover_keywords, cover_gen_prompt, kw_map, gen_prompt_map = _keywords_for_board(cfg, llm, board, prompt=prompt)
+        else:
+            cover_keywords, cover_gen_prompt, kw_map, gen_prompt_map = ([], "", {}, {})
 
         topic_dir = images_dir / str(board.topic_index)
         topic_dir.mkdir(exist_ok=True)
 
         used_source_urls: set[str] = set()
-        cover = _fetch_cover_image(cfg, providers, board, cover_keywords, topic_dir, used_source_urls)
+        cover = _fetch_cover_image(cfg, providers, board, cover_keywords, cover_gen_prompt, topic_dir, used_source_urls)
         shot_images: list[dict] = []
         if cover_only:
             shot_images = existing_map.get(board.topic_index, {}).get("shots", [])
@@ -73,7 +78,9 @@ def run(
                 kws = kw_map.get(shot.index, [])
                 query = " ".join(kws[:2]) if kws else shot.broll[:60]
                 img_path = topic_dir / f"shot_{shot.index:03d}.jpg"
-                gen_prompt = _build_enhanced_gen_prompt(board.title, shot)
+                gen_prompt = gen_prompt_map.get(shot.index, "")
+                if not gen_prompt:
+                    gen_prompt = _build_enhanced_gen_prompt(board.title, shot)
                 meta = _fetch_with_fallbacks(
                     cfg,
                     providers,
@@ -152,7 +159,7 @@ def _active_providers(cfg: Config) -> list[str]:
     return providers
 
 
-def _keywords_for_board(cfg: Config, llm: LLM, board, *, prompt: str | None = None) -> tuple[list[str], dict[int, list[str]]]:
+def _keywords_for_board(cfg: Config, llm: LLM, board, *, prompt: str | None = None) -> tuple[list[str], str, dict[int, list[str]], dict[int, str]]:
     shots_blob = "\n".join(
         f"shot {s.index}: subtitle={s.subtitle} | visual={s.visual} | broll={s.broll}"
         for s in board.shots
@@ -163,7 +170,11 @@ def _keywords_for_board(cfg: Config, llm: LLM, board, *, prompt: str | None = No
         _Schema,
         temperature=cfg.profile.generation.images_temperature,
     )
-    return schema.cover_keywords, {s.index: s.keywords for s in schema.shots}
+    cover_kws = schema.cover_keywords
+    cover_gen_prompt = schema.cover_generation_prompt
+    kw_map = {s.index: s.keywords for s in schema.shots}
+    gen_prompt_map = {s.index: s.generation_prompt for s in schema.shots}
+    return cover_kws, cover_gen_prompt, kw_map, gen_prompt_map
 
 
 def _fetch_cover_image(
@@ -171,20 +182,21 @@ def _fetch_cover_image(
     providers: list[str],
     board,
     cover_keywords: list[str],
+    cover_gen_prompt: str,
     topic_dir: Path,
     used_source_urls: set[str],
 ) -> dict | None:
     query = " ".join(cover_keywords[:3]) if cover_keywords else board.title
     first_broll = board.shots[0].broll if board.shots else ""
     cover_path = topic_dir / "cover.jpg"
-    cover_gen_prompt = _build_cover_gen_prompt(board.title, board.shots[0] if board.shots else None)
+    prompt_to_use = cover_gen_prompt or _build_cover_gen_prompt(board.title, board.shots[0] if board.shots else None)
     meta = _fetch_with_fallbacks(
         cfg,
         _cover_provider_order(providers),
         [query, first_broll, board.title],
         cover_path,
         used_source_urls,
-        gen_prompt=cover_gen_prompt,
+        gen_prompt=prompt_to_use,
     )
     if meta:
         print(f"  ✓ topic {board.topic_index} cover: {meta['provider']} / {meta['query']}")

@@ -205,7 +205,16 @@ async function generateHuggingFaceImage(request: TextToImageRequest): Promise<Te
     }),
   });
   if (!response.ok) {
-    throw new Error(`Hugging Face image generation failed: ${response.status}`);
+    let errMsg = `Hugging Face image generation failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload && typeof payload.error === "string") {
+        errMsg = `Hugging Face error (${response.status}): ${payload.error}`;
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(errMsg);
   }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.startsWith("image/")) {
