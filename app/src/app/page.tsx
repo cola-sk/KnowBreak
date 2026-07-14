@@ -1,15 +1,17 @@
 import { StartForm } from "@/components/start-form";
 import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
 import { listWorkflows, resolveOutDir } from "@/lib/review-store";
+import { readTtsRuntimeDefaults } from "@/lib/tts-settings-server";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [workflows, outDir, profileBase, globalOverrides] = await Promise.all([
+  const [workflows, outDir, profileBase, globalOverrides, ttsDefaults] = await Promise.all([
     listWorkflows(),
     resolveOutDir(),
     readProfileBase(),
     readProfileOverrides(),
+    readTtsRuntimeDefaults(),
   ]);
 
   return (
@@ -22,7 +24,12 @@ export default async function HomePage() {
         </p>
       </div>
 
-      <StartForm workflows={workflows} profileBase={profileBase} globalOverrides={globalOverrides} />
+      <StartForm
+        workflows={workflows}
+        profileBase={profileBase}
+        globalOverrides={globalOverrides}
+        ttsDefaults={ttsDefaults}
+      />
 
       <div className="footer-info">
         <span className="info-label">本地产出目录：</span>

@@ -12,6 +12,7 @@ interface ScriptLine {
 interface ScriptItem {
   topic_index: number;
   title: string;
+  cover_narration?: string;
   lines: ScriptLine[];
   total_duration: number;
   hashtags: string[];
@@ -83,6 +84,18 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
         },
       };
     });
+  };
+
+  const updateScriptField = (scriptIndex: number, key: "title" | "cover_narration", value: string) => {
+    setData((prev) => ({
+      ...prev,
+      artifact: {
+        ...prev.artifact,
+        scripts: prev.artifact.scripts.map((script, sIdx) =>
+          sIdx === scriptIndex ? { ...script, [key]: value } : script,
+        ),
+      },
+    }));
   };
 
   const save = async () => {
@@ -172,6 +185,27 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
             </div>
             <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 2 }}>
               total_duration: {script.total_duration}s
+            </div>
+
+            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+              <div>
+                <label style={{ fontSize: 12, color: "var(--muted)" }}>
+                  封面显示标题 / script.title（控制 MP4 封面大字和正文顶部标题）
+                </label>
+                <input
+                  value={script.title}
+                  onChange={(event) => updateScriptField(sIdx, "title", event.target.value)}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: "var(--muted)" }}>
+                  cover_narration（只控制封面朗读，不控制画面大字）
+                </label>
+                <textarea
+                  value={script.cover_narration ?? ""}
+                  onChange={(event) => updateScriptField(sIdx, "cover_narration", event.target.value)}
+                />
+              </div>
             </div>
 
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>

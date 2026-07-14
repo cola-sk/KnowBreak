@@ -339,6 +339,13 @@ textarea {
   outline: none;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
 input:hover,
 select:hover,
 textarea:hover {
@@ -1080,6 +1087,37 @@ a.tab.active {
   padding-right: 4px;
 }
 
+.tts-config-modal {
+  width: min(720px, 100%);
+  height: auto;
+  max-height: calc(100vh - 48px);
+  grid-template-rows: auto auto;
+  gap: 18px;
+}
+
+.tts-config-body {
+  overflow: visible;
+  padding-right: 0;
+}
+
+.tts-config-form {
+  display: grid;
+  gap: 14px;
+}
+
+.tts-config-form label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.tts-config-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
 .project-config-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1101,6 +1139,11 @@ a.tab.active {
     height: calc(100vh - 24px);
     max-height: calc(100vh - 24px);
     padding: 14px;
+  }
+
+  .tts-config-modal {
+    height: auto;
+    max-height: calc(100vh - 24px);
   }
 
   .project-config-modal-head {
@@ -2430,4 +2473,3 @@ a.tab.active {
   background-color: light-dark(rgba(0,0,0,0.05), rgba(255,255,255,0.08));
   color: var(--ink);
 }
-

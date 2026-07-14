@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { readImageFileFromClipboard } from "@/lib/clipboard-image";
+import { buildContextualImagePrompt } from "@/lib/image-generation-prompt";
 import type { ReviewFile, ReviewItemStatus } from "@/lib/types";
 
 interface ImageEntry {
@@ -81,16 +83,41 @@ interface CropEditorState {
   fileName: string;
 }
 
+type PromptSource = "visual" | "narration" | "script" | "query" | "prompt" | "fallback";
+
+interface PromptSources {
+  visual?: string;
+  narration?: string;
+  script?: string;
+  broll?: string;
+  subtitle?: string;
+  query?: string;
+  prompt?: string;
+  fallback?: string;
+}
+
 interface GenerateEditorState {
   itemId: string;
   title: string;
   prompt: string;
   provider: string;
   model: string;
+  promptSource: PromptSource;
+  sources: PromptSources;
+  useContextPrompt: boolean;
   previewImageBase64?: string;
   previewContentType?: string;
   previewMetadata?: GeneratedImageMetadata;
 }
+
+const PROMPT_SOURCE_LABELS: Record<PromptSource, string> = {
+  visual: "分镜画面",
+  narration: "旁白",
+  script: "口播文案",
+  query: "搜索词",
+  prompt: "原 prompt",
+  fallback: "默认提示词",
+};
 
 interface GeneratedImageMetadata {
   provider: string;
@@ -206,14 +233,43 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
     });
   };
 
-  const openGenerateEditor = (itemId: string, title: string, image: ImageEntry) => {
-    const prompt = image.prompt || image.query || `${title}, vertical 9:16 documentary science image`;
+  const openGenerateEditor = (
+    itemId: string,
+    title: string,
+    image: ImageEntry,
+    shotCtx?: { line?: ScriptLine; shot?: StoryboardShot },
+  ) => {
+    const sources: PromptSources = {
+      visual: shotCtx?.shot?.visual?.trim() || undefined,
+      narration: shotCtx?.shot?.narration?.trim() || undefined,
+      script: shotCtx?.line?.text?.trim() || undefined,
+      broll: shotCtx?.shot?.broll?.trim() || undefined,
+      subtitle: shotCtx?.shot?.subtitle?.trim() || undefined,
+      query: image.query?.trim() || undefined,
+      prompt: image.prompt?.trim() || undefined,
+      fallback: `${title}, vertical 9:16 documentary science image`,
+    };
+    const defaultSource: PromptSource = sources.visual
+      ? "visual"
+      : sources.narration
+        ? "narration"
+        : sources.script
+          ? "script"
+          : sources.query
+            ? "query"
+            : sources.prompt
+              ? "prompt"
+              : "fallback";
+    const initialPrompt = sources[defaultSource] || "";
     setGenerateEditor({
       itemId,
       title,
-      prompt,
+      prompt: initialPrompt,
       provider: "pollinations",
       model: defaultModelForProvider("pollinations"),
+      promptSource: defaultSource,
+      sources,
+      useContextPrompt: true,
     });
     setMessage("");
   };
@@ -392,11 +448,19 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
     if (!generateEditor) {
       return;
     }
-    const prompt = generateEditor.prompt.trim();
-    if (!prompt) {
+    const rawPrompt = generateEditor.prompt.trim();
+    if (!rawPrompt) {
       setMessage("请输入生图提示词。");
       return;
     }
+    const prompt = generateEditor.useContextPrompt
+      ? buildContextualImagePrompt({
+          corePrompt: rawPrompt,
+          itemTitle: generateEditor.title,
+          promptSource: generateEditor.promptSource,
+          sources: generateEditor.sources,
+        })
+      : rawPrompt;
 
     setSaving(true);
     setGeneratingItemId(generateEditor.itemId);
@@ -613,7 +677,7 @@ interface ImageCardProps {
   onChange: (id: string, patch: Partial<{ status: ReviewItemStatus; notes: string }>) => void;
   imageVersionToken: string;
   onReplaceFile: (itemId: string, title: string, file: File) => void;
-  onGenerate: (itemId: string, title: string, image: ImageEntry) => void;
+  onGenerate: (itemId: string, title: string, image: ImageEntry, shotContext?: { line?: ScriptLine; shot?: StoryboardShot }) => void;
   replacing: boolean;
   generating: boolean;
 }
@@ -632,6 +696,21 @@ function ImageCard({
   generating,
 }: ImageCardProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [pasteMessage, setPasteMessage] = useState("");
+
+  const pasteFromClipboard = async () => {
+    setPasteMessage("");
+    try {
+      const file = await readImageFileFromClipboard();
+      if (!file) {
+        setPasteMessage("未读取到剪贴板图片。请先复制图片，再点击粘贴图片。");
+        return;
+      }
+      onReplaceFile(itemId, title, file);
+    } catch {
+      setPasteMessage("浏览器未允许直接读取剪贴板。可先点上传，或在裁剪弹窗里按 Ctrl/Cmd + V。");
+    }
+  };
 
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 10 }}>
@@ -738,10 +817,18 @@ function ImageCard({
         <button className="secondary" disabled={replacing} onClick={() => inputRef.current?.click()}>
           {replacing ? "替换中..." : "上传并裁剪"}
         </button>
-        <button className="secondary" disabled={generating} onClick={() => onGenerate(itemId, title, image)}>
+        <button className="secondary" disabled={generating} onClick={() => onGenerate(itemId, title, image, shotContext)}>
           {generating ? "生成中..." : "AI 生成替换"}
         </button>
+        <button className="secondary" disabled={replacing} onClick={pasteFromClipboard}>
+          粘贴图片
+        </button>
       </div>
+      {pasteMessage ? (
+        <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 12, lineHeight: 1.4 }}>
+          {pasteMessage}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -768,6 +855,14 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
   const previewSrc = editor.previewImageBase64
     ? `data:${editor.previewContentType ?? "image/jpeg"};base64,${editor.previewImageBase64}`
     : "";
+  const effectivePrompt = editor.useContextPrompt
+    ? buildContextualImagePrompt({
+        corePrompt: editor.prompt,
+        itemTitle: editor.title,
+        promptSource: editor.promptSource,
+        sources: editor.sources,
+      })
+    : editor.prompt;
 
   return (
     <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
@@ -822,6 +917,50 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
             />
           </div>
           <div className="form-row">
+            <label className="form-label">文案来源</label>
+            <select
+              value={editor.promptSource}
+              disabled={busy}
+              onChange={(event) => {
+                const nextSource = event.target.value as PromptSource;
+                const nextPrompt = editor.sources[nextSource];
+                onChange({
+                  ...editor,
+                  promptSource: nextSource,
+                  prompt: nextPrompt ?? editor.prompt,
+                  previewImageBase64: undefined,
+                  previewContentType: undefined,
+                  previewMetadata: undefined,
+                });
+              }}
+            >
+              {(Object.keys(PROMPT_SOURCE_LABELS) as PromptSource[]).map((source) => {
+                const value = editor.sources[source];
+                return (
+                  <option key={source} value={source} disabled={!value}>
+                    {PROMPT_SOURCE_LABELS[source]}
+                    {value ? "" : "（无）"}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={editor.useContextPrompt}
+              disabled={busy}
+              onChange={(event) => onChange({
+                ...editor,
+                useContextPrompt: event.target.checked,
+                previewImageBase64: undefined,
+                previewContentType: undefined,
+                previewMetadata: undefined,
+              })}
+            />
+            <span>上下文增强</span>
+          </label>
+          <div className="form-row">
             <label className="form-label">prompt</label>
             <textarea
               value={editor.prompt}
@@ -836,6 +975,12 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
               })}
             />
           </div>
+          {editor.useContextPrompt ? (
+            <div className="form-row">
+              <label className="form-label">最终发送 prompt</label>
+              <textarea value={effectivePrompt} readOnly rows={7} />
+            </div>
+          ) : null}
           <div className="image-generate-preview-slot">
             {previewSrc ? (
               <img src={previewSrc} alt="AI 生成预览" />
@@ -1011,6 +1156,20 @@ function ImageCropModal({ editor, busy, onClose, onSave, onPickAnother }: ImageC
     }
   };
 
+  const pasteAnother = async () => {
+    setLocalMessage("");
+    try {
+      const file = await readImageFileFromClipboard();
+      if (!file) {
+        setLocalMessage("未读取到剪贴板图片。请先复制图片，再点击从剪贴板换图。");
+        return;
+      }
+      onPickAnother(file);
+    } catch {
+      setLocalMessage("浏览器未允许直接读取剪贴板。请按 Ctrl/Cmd + V，或选择本地图片。");
+    }
+  };
+
   return (
     <div
       style={{
@@ -1116,6 +1275,9 @@ function ImageCropModal({ editor, busy, onClose, onSave, onPickAnother }: ImageC
               />
               <button className="secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
                 选择另一张图
+              </button>
+              <button className="secondary" disabled={busy} onClick={pasteAnother}>
+                从剪贴板换图
               </button>
               <button className="primary" disabled={busy || !size} onClick={saveCropped}>
                 保存裁剪并替换

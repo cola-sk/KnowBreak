@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 
 import { buildRuntimeEnv } from "@/lib/runtime-env";
 import type { RegenerationJob } from "@/lib/types";
+import { runtimeOverridesToEnv, type ProjectRuntimeOverrides } from "@/lib/tts-settings";
 import {
   getProductionReviewData,
   getVersionDir,
@@ -66,6 +67,7 @@ interface RegenerateRequest {
   workflow?: string;
   source?: string;
   projectOverrides?: Record<string, any>;
+  runtimeOverrides?: ProjectRuntimeOverrides;
 }
 
 function resolveProjectRoot(): string {
@@ -307,6 +309,17 @@ export async function POST(
         );
       }
     }
+    if (body.runtimeOverrides) {
+      const activeDir = getVersionDir(videoId, jobVersion);
+      if (existsSync(activeDir)) {
+        await fs.mkdir(activeDir, { recursive: true });
+        await fs.writeFile(
+          path.join(activeDir, "project_runtime_overrides.json"),
+          JSON.stringify(body.runtimeOverrides, null, 2),
+          "utf-8",
+        );
+      }
+    }
 
     const args = [
       "run",
@@ -383,6 +396,8 @@ export async function POST(
     const childEnv = await buildRuntimeEnv(projectRoot, {
       KB_REVIEW_AUTO_APPROVE: "0",
       ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
+      ...(body.runtimeOverrides ? { KB_PROJECT_RUNTIME_OVERRIDES: JSON.stringify(body.runtimeOverrides) } : {}),
+      ...runtimeOverridesToEnv(body.runtimeOverrides),
     });
 
     const child = spawn("uv", args, {

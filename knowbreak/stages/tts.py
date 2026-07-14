@@ -3,7 +3,7 @@
 输入：scripts.json
 输出：每个选题每句一个 mp3 + 拼接后的完整 mp3 + tts.json
 
-支持 OpenAI / 火山 Seed Audio / MiniMax / edge-tts。非 edge provider 失败后自动切到 edge 兜底。
+支持 OpenAI / 火山 Seed Audio / MiniMax / edge-tts。TTS provider 失败时直接报错，避免静默换声。
 """
 
 from __future__ import annotations
@@ -75,6 +75,13 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
     tts_dir = pdir / "tts"
     tts_dir.mkdir(exist_ok=True)
     provider = _normalize_provider(cfg.tts.provider)
+    if provider == "volcengine":
+        print(
+            "  TTS config: "
+            f"provider=volcengine, model={cfg.tts.volc_model}, speaker={cfg.tts.volc_speaker}"
+        )
+    else:
+        print(f"  TTS config: provider={provider}, voice={cfg.tts.voice}")
 
     # 开启口播封面时，把空的 cover_narration 用 title+？ 兜底并写回 scripts.json
     # 让 UI 能看到、能编辑；老视频重跑 tts 即可补上文案
@@ -126,7 +133,7 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
             cache_key = _get_hash(cover_narration, prov_config)
             cached_item = cache_index.get(cache_key)
             cached_file = cache_dir / f"{cache_key}.mp3"
-            if cached_item and cached_file.exists():
+            if cached_item and cached_file.exists() and cached_item.get("actual_provider") == provider:
                 shutil.copy(cached_file, cover_mp3)
                 actual_provider = cached_item["actual_provider"]
                 cover_duration = cached_item["duration"]
@@ -134,20 +141,23 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
             else:
                 actual_provider = _synth(cover_narration, cover_mp3, cfg, provider)
                 cover_duration = _probe_duration(cover_mp3)
-                shutil.copy(cover_mp3, cached_file)
-                cache_index[cache_key] = {
-                    "text": cover_narration,
-                    "requested_provider": provider,
-                    "actual_provider": actual_provider,
-                    "duration": cover_duration,
-                }
-                try:
-                    cache_index_path.write_text(
-                        json.dumps(cache_index, ensure_ascii=False, indent=2),
-                        encoding="utf-8"
-                    )
-                except Exception as e:
-                    print(f"  Warning: failed to save tts cache index: {e}")
+                if actual_provider == provider:
+                    shutil.copy(cover_mp3, cached_file)
+                    cache_index[cache_key] = {
+                        "text": cover_narration,
+                        "requested_provider": provider,
+                        "actual_provider": actual_provider,
+                        "duration": cover_duration,
+                    }
+                    try:
+                        cache_index_path.write_text(
+                            json.dumps(cache_index, ensure_ascii=False, indent=2),
+                            encoding="utf-8"
+                        )
+                    except Exception as e:
+                        print(f"  Warning: failed to save tts cache index: {e}")
+                else:
+                    print(f"  - TTS fallback result not cached for cover: requested={provider}, actual={actual_provider}")
             cover_audio_rel = str(cover_mp3.relative_to(cfg.out_dir))
 
         line_audios: list[TTSLine] = []
@@ -161,7 +171,7 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
             cached_item = cache_index.get(cache_key)
             cached_file = cache_dir / f"{cache_key}.mp3"
 
-            if cached_item and cached_file.exists():
+            if cached_item and cached_file.exists() and cached_item.get("actual_provider") == provider:
                 shutil.copy(cached_file, mp3)
                 actual_provider = cached_item["actual_provider"]
                 dur = cached_item["duration"]
@@ -170,22 +180,25 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
                 actual_provider = _synth(line.text, mp3, cfg, provider)
                 dur = _probe_duration(mp3)
 
-                # Copy to cache
-                shutil.copy(mp3, cached_file)
-                # Update index
-                cache_index[cache_key] = {
-                    "text": line.text,
-                    "requested_provider": provider,
-                    "actual_provider": actual_provider,
-                    "duration": dur,
-                }
-                try:
-                    cache_index_path.write_text(
-                        json.dumps(cache_index, ensure_ascii=False, indent=2),
-                        encoding="utf-8"
-                    )
-                except Exception as e:
-                    print(f"  Warning: failed to save tts cache index: {e}")
+                if actual_provider == provider:
+                    # Copy to cache
+                    shutil.copy(mp3, cached_file)
+                    # Update index
+                    cache_index[cache_key] = {
+                        "text": line.text,
+                        "requested_provider": provider,
+                        "actual_provider": actual_provider,
+                        "duration": dur,
+                    }
+                    try:
+                        cache_index_path.write_text(
+                            json.dumps(cache_index, ensure_ascii=False, indent=2),
+                            encoding="utf-8"
+                        )
+                    except Exception as e:
+                        print(f"  Warning: failed to save tts cache index: {e}")
+                else:
+                    print(f"  - TTS fallback result not cached for topic {script.topic_index} line {i}: requested={provider}, actual={actual_provider}")
 
             line_audios.append(TTSLine(
                 index=i,
@@ -235,18 +248,13 @@ def _synth(text: str, out_path: Path, cfg: Config, provider: str) -> str:
     if provider == "edge":
         _synth_edge(text, out_path, cfg)
         return provider
-    try:
-        if provider == "openai":
-            _synth_openai(text, out_path, cfg)
-        elif provider == "volcengine":
-            _synth_volcengine(text, out_path, cfg)
-        elif provider == "minimax":
-            _synth_minimax(text, out_path, cfg)
-        return provider
-    except Exception as e:
-        print(f"  - TTS provider {provider} 失败，切换 edge 兜底: {e!r}")
-        _synth_edge(text, out_path, cfg)
-        return "edge"
+    if provider == "openai":
+        _synth_openai(text, out_path, cfg)
+    elif provider == "volcengine":
+        _synth_volcengine(text, out_path, cfg)
+    elif provider == "minimax":
+        _synth_minimax(text, out_path, cfg)
+    return provider
 
 
 def _synth_edge(text: str, out_path: Path, cfg: Config) -> None:

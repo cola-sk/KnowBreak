@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 
 import { buildRuntimeEnv } from "@/lib/runtime-env";
 import { listWorkflows, resolveProjectRoot } from "@/lib/review-store";
+import { runtimeOverridesToEnv, type ProjectRuntimeOverrides } from "@/lib/tts-settings";
 import {
   type StartJob,
   jobLogPath,
@@ -26,6 +27,7 @@ interface StartRequest {
   input?: string;
   workflow?: string;
   projectOverrides?: Record<string, any>;
+  runtimeOverrides?: ProjectRuntimeOverrides;
 }
 
 function validateWorkflow(workflow: string): string {
@@ -105,6 +107,8 @@ export async function POST(request: Request) {
     const childEnv = await buildRuntimeEnv(projectRoot, {
       KB_REVIEW_AUTO_APPROVE: "0",
       ...(body.projectOverrides ? { KB_PROJECT_PROFILE_OVERRIDES: JSON.stringify(body.projectOverrides) } : {}),
+      ...(body.runtimeOverrides ? { KB_PROJECT_RUNTIME_OVERRIDES: JSON.stringify(body.runtimeOverrides) } : {}),
+      ...runtimeOverridesToEnv(body.runtimeOverrides),
     });
 
     const child = spawn("uv", args, {

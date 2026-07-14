@@ -14,7 +14,7 @@ steps = [
 
 [capabilities.topic_seed]
 prompt = "prompts/topic_seed.md"
-params = { target_duration = "90" }
+params = { target_duration = "150" }
 inputs = []
 outputs = ["topics.json"]
 

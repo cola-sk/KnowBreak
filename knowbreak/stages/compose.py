@@ -36,6 +36,7 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
     compose_dir.mkdir(exist_ok=True)
 
     images_map, cover_map = _load_images_map(pdir / "images.json", cfg.out_dir)
+    script_titles = _load_script_title_map(pdir / "scripts.json")
 
     videos = []
     for script in tts.scripts:
@@ -46,8 +47,9 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
 
         shot_imgs = images_map.get(script.topic_index, {})
         cover_img = cover_map.get(script.topic_index)
+        display_title = script_titles.get(script.topic_index, script.title)
         images = _render_subtitle_images(
-            script_dir, script.title, script.lines, shot_imgs, cfg.profile.compose
+            script_dir, display_title, script.lines, shot_imgs, cfg.profile.compose
         )
         durations = _line_durations(script_dir)
         intro_duration = cfg.intro.duration if cfg.intro.enabled else 0.0
@@ -59,7 +61,7 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
             intro_duration = script.cover_duration
         intro_image = None
         if intro_duration > 0:
-            intro_image = _render_intro_image(script_dir, script.title, cover_img, cfg.profile.compose)
+            intro_image = _render_intro_image(script_dir, display_title, cover_img, cfg.profile.compose)
             images.insert(0, intro_image)
             durations.insert(0, intro_duration)
         mp4_path = compose_dir / f"{script.topic_index}.mp4"
@@ -72,7 +74,7 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
 
         videos.append({
             "topic_index": script.topic_index,
-            "title": script.title,
+            "title": display_title,
             "path": str(mp4_path.relative_to(cfg.out_dir)),
             "duration": script.total_duration + intro_duration,
             "intro_duration": intro_duration,
@@ -90,6 +92,23 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
     compose_json_path.write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    return result
+
+
+def _load_script_title_map(path: Path) -> dict[int, str]:
+    """Read latest scripts.json titles so compose-only reruns reflect review edits."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    result: dict[int, str] = {}
+    for script in data.get("scripts", []):
+        topic_index = script.get("topic_index")
+        title = (script.get("title") or "").strip()
+        if isinstance(topic_index, int) and title:
+            result[topic_index] = title
     return result
 
 

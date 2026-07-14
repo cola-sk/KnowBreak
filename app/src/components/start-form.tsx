@@ -5,12 +5,22 @@ import { useRouter } from "next/navigation";
 import { useState, useMemo } from "react";
 
 import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
+import { TtsSettingsPanel } from "@/components/tts-settings-panel";
 import type { WorkflowSummary } from "@/lib/review-store";
+import {
+  compactRuntimeOverrides,
+  countRuntimeOverrideLeaves,
+  effectiveTtsSettings,
+  saveTtsHistoryItem,
+  type ProjectRuntimeOverrides,
+  type TtsRuntimeDefaults,
+} from "@/lib/tts-settings";
 
 interface Props {
   workflows: WorkflowSummary[];
   profileBase: Record<string, unknown>;
   globalOverrides: Record<string, unknown>;
+  ttsDefaults: TtsRuntimeDefaults;
 }
 
 interface StartResponse {
@@ -33,7 +43,7 @@ interface JobStatus {
   error?: string;
 }
 
-export function StartForm({ workflows, profileBase, globalOverrides }: Props) {
+export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults }: Props) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [workflow, setWorkflow] = useState("topic_seed_review");
@@ -44,6 +54,7 @@ export function StartForm({ workflows, profileBase, globalOverrides }: Props) {
 
   // Project overrides state
   const [projectOverrides, setProjectOverrides] = useState<Record<string, unknown>>({});
+  const [runtimeOverrides, setRuntimeOverrides] = useState<ProjectRuntimeOverrides>({});
   const [showConfig, setShowConfig] = useState(false);
   const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
 
@@ -65,6 +76,7 @@ export function StartForm({ workflows, profileBase, globalOverrides }: Props) {
     setError("");
     setStatus("正在启动...");
     try {
+      saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
       const response = await fetch("/api/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -72,6 +84,9 @@ export function StartForm({ workflows, profileBase, globalOverrides }: Props) {
           input: trimmed,
           workflow,
           projectOverrides: countOverrideLeaves(projectOverrides) > 0 ? projectOverrides : undefined,
+          runtimeOverrides: countRuntimeOverrideLeaves(runtimeOverrides) > 0
+            ? compactRuntimeOverrides(runtimeOverrides)
+            : undefined,
         }),
       });
       const payload = (await response.json()) as StartResponse;
@@ -221,6 +236,13 @@ export function StartForm({ workflows, profileBase, globalOverrides }: Props) {
           onClose={() => setShowConfig(false)}
         />
       ) : null}
+
+      <TtsSettingsPanel
+        value={runtimeOverrides}
+        defaults={ttsDefaults}
+        onChange={setRuntimeOverrides}
+        disabled={submitting}
+      />
 
       <div className="form-actions">
         <button

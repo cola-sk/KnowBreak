@@ -5,7 +5,7 @@ import pytest
 from knowbreak.config import ASRConfig, Config, IntroConfig, LLMConfig, TTSConfig
 from knowbreak.pipeline import _video_id_from_run_dir, artifact_path, resolve_project_run_dir, run_full
 from knowbreak.stages.review import _review_url
-from knowbreak.stages.compose import _load_images_map
+from knowbreak.stages.compose import _load_images_map, _load_script_title_map
 
 
 def _config(out_dir: Path) -> Config:
@@ -87,6 +87,22 @@ def test_compose_loads_versioned_image_paths(tmp_path: Path) -> None:
 
     assert covers[0] == str(out_dir / "video123" / "v001" / "images" / "0" / "cover.jpg")
     assert shots[0][0] == str(out_dir / "video123" / "v001" / "images" / "0" / "shot_000.jpg")
+
+
+def test_compose_loads_latest_script_titles(tmp_path: Path) -> None:
+    scripts_json = tmp_path / "scripts.json"
+    scripts_json.write_text(
+        """{
+          "video_id": "video123",
+          "scripts": [
+            {"topic_index": 0, "title": "新的封面标题"},
+            {"topic_index": 1, "title": ""}
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    assert _load_script_title_map(scripts_json) == {0: "新的封面标题"}
 
 
 def test_video_id_from_run_dir_handles_legacy_and_versioned_dirs(tmp_path: Path) -> None:

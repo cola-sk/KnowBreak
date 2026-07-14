@@ -4,7 +4,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
+import { TtsSettingsPanel } from "@/components/tts-settings-panel";
+import { readImageFileFromClipboard } from "@/lib/clipboard-image";
+import { buildContextualImagePrompt } from "@/lib/image-generation-prompt";
 import type { RegenerationJob, RegenerationJobDetail, ReviewFile, ReviewStage } from "@/lib/types";
+import {
+  compactRuntimeOverrides,
+  countRuntimeOverrideLeaves,
+  effectiveTtsSettings,
+  saveTtsHistoryItem,
+  type ProjectRuntimeOverrides,
+  type TtsRuntimeDefaults,
+} from "@/lib/tts-settings";
 
 interface ScriptLine {
   text: string;
@@ -95,12 +106,14 @@ export interface ProductionReviewPayload {
   job: RegenerationJob | null;
   regenerationJobs: RegenerationJob[];
   projectOverrides?: Record<string, any>;
+  runtimeOverrides?: ProjectRuntimeOverrides;
 }
 
 interface Props {
   initial: ProductionReviewPayload;
   profileBase: Record<string, unknown>;
   globalOverrides: Record<string, unknown>;
+  ttsDefaults: TtsRuntimeDefaults;
 }
 
 interface CropEditorState {
@@ -110,12 +123,29 @@ interface CropEditorState {
   fileName: string;
 }
 
+type PromptSource = "visual" | "narration" | "script" | "query" | "prompt" | "title" | "fallback";
+
+interface PromptSources {
+  visual?: string;
+  narration?: string;
+  script?: string;
+  broll?: string;
+  subtitle?: string;
+  query?: string;
+  prompt?: string;
+  title?: string;
+  fallback?: string;
+}
+
 interface GenerateEditorState {
   itemId: string;
   title: string;
   prompt: string;
   provider: string;
   model: string;
+  promptSource: PromptSource;
+  sources: PromptSources;
+  useContextPrompt: boolean;
   previewImageBase64?: string;
   previewContentType?: string;
   previewMetadata?: GeneratedImageMetadata;
@@ -159,8 +189,27 @@ const IMAGE_PROVIDER_OPTIONS = [
   { value: "huggingface", label: "Hugging Face", defaultModel: "black-forest-labs/FLUX.1-schnell" },
 ];
 
+const PROMPT_SOURCE_LABELS: Record<PromptSource, string> = {
+  visual: "分镜画面",
+  narration: "旁白",
+  script: "口播文案",
+  query: "搜索词",
+  prompt: "原 prompt",
+  title: "标题",
+  fallback: "默认提示词",
+};
+
 function defaultModelForProvider(provider: string): string {
   return IMAGE_PROVIDER_OPTIONS.find((option) => option.value === provider)?.defaultModel ?? "";
+}
+
+function sourceText(value: string | undefined | null): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function firstAvailablePromptSource(sources: PromptSources, preferred: PromptSource[]): PromptSource {
+  return preferred.find((source) => Boolean(sources[source])) ?? "fallback";
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -220,6 +269,10 @@ function uniqueStageOptions(steps: string[]): string[] {
   return ["start", ...preferred.filter((step) => fromWorkflow.includes(step))];
 }
 
+function sourceInputApplies(startFrom: string): boolean {
+  return startFrom === "start" || startFrom === "asr" || startFrom === "topic_seed";
+}
+
 function isImageFile(file: File): boolean {
   return file.type.startsWith("image/");
 }
@@ -240,7 +293,7 @@ function clampOffset(offset: Point, size: Size, scale: number): Point {
   };
 }
 
-export function ProductionReviewClient({ initial, profileBase, globalOverrides }: Props) {
+export function ProductionReviewClient({ initial, profileBase, globalOverrides, ttsDefaults }: Props) {
   const [data, setData] = useState<ProductionReviewPayload>(initial);
   const [topicIndex, setTopicIndex] = useState<number>(initial.videos[0]?.topic_index ?? 0);
   const [saving, setSaving] = useState(false);
@@ -266,6 +319,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
 
   // Project overrides state
   const [projectOverrides, setProjectOverrides] = useState<Record<string, any>>(() => initial.projectOverrides ?? {});
+  const [runtimeOverrides, setRuntimeOverrides] = useState<ProjectRuntimeOverrides>(() => initial.runtimeOverrides ?? {});
   const [showConfig, setShowConfig] = useState(false);
   const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
 
@@ -286,6 +340,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
   }, [data.artifacts.images, topicIndex]);
 
   const stageOptions = useMemo(() => uniqueStageOptions(data.workflowSteps), [data.workflowSteps]);
+  const sourceInputEnabled = sourceInputApplies(startFrom);
+  const sourceInputLabel = data.workflowSteps.includes("asr") ? "source / 视频源" : "topic / 主题输入";
   const imageToken = data.reviews.image_review?.updated_at ?? data.job?.finishedAt ?? data.version;
   const workflowStageProgress = useMemo(() => {
     const artifactDone: Record<string, boolean> = {
@@ -314,6 +370,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
       setData(payload);
       setSource(payload.source);
       setWorkflow(payload.workflow);
+      setRuntimeOverrides(payload.runtimeOverrides ?? {});
       setLastRefreshedAt(new Date().toISOString());
       setIsDirty(false);
     } catch (error) {
@@ -332,13 +389,22 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     });
   };
 
-  const openGenerateEditor = (itemId: string, title: string, prompt: string) => {
+  const openGenerateEditor = (
+    itemId: string,
+    title: string,
+    sources: PromptSources,
+    preferredSources: PromptSource[],
+  ) => {
+    const promptSource = firstAvailablePromptSource(sources, preferredSources);
     setGenerateEditor({
       itemId,
       title,
-      prompt,
+      prompt: sources[promptSource] ?? "",
       provider: "pollinations",
       model: defaultModelForProvider("pollinations"),
+      promptSource,
+      sources,
+      useContextPrompt: true,
     });
     setMessage("");
   };
@@ -529,6 +595,41 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     });
   };
 
+  const updateScriptTitle = (value: string) => {
+    setIsDirty(true);
+    setData((prev) => {
+      const nextArtifacts = { ...prev.artifacts };
+      if (prev.artifacts.script) {
+        nextArtifacts.script = {
+          ...prev.artifacts.script,
+          scripts: prev.artifacts.script.scripts.map((script) =>
+            script.topic_index === topicIndex ? { ...script, title: value } : script,
+          ),
+        };
+      }
+      if (prev.artifacts.storyboard) {
+        nextArtifacts.storyboard = {
+          ...prev.artifacts.storyboard,
+          storyboards: prev.artifacts.storyboard.storyboards.map((board) =>
+            board.topic_index === topicIndex ? { ...board, title: value } : board,
+          ),
+        };
+      }
+      if (prev.artifacts.images) {
+        nextArtifacts.images = prev.artifacts.images.map((topic) =>
+          topic.topic_index === topicIndex ? { ...topic, title: value } : topic,
+        );
+      }
+      return {
+        ...prev,
+        artifacts: nextArtifacts,
+        videos: prev.videos.map((video) =>
+          video.topic_index === topicIndex ? { ...video, title: value } : video,
+        ),
+      };
+    });
+  };
+
   const updateShot = (shotIndex: number, key: keyof Shot, value: string) => {
     setIsDirty(true);
     setData((prev) => {
@@ -695,6 +796,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     if (window.confirm("确定要放弃所有未保存的修改吗？")) {
       setData(initial);
       setProjectOverrides(initial.projectOverrides ?? {});
+      setRuntimeOverrides(initial.runtimeOverrides ?? {});
       setIsDirty(false);
       setMessage("已放弃所有未保存的修改");
     }
@@ -744,11 +846,19 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
     if (!generateEditor) {
       return;
     }
-    const prompt = generateEditor.prompt.trim();
-    if (!prompt) {
+    const rawPrompt = generateEditor.prompt.trim();
+    if (!rawPrompt) {
       setMessage("请输入生图提示词。");
       return;
     }
+    const prompt = generateEditor.useContextPrompt
+      ? buildContextualImagePrompt({
+          corePrompt: rawPrompt,
+          itemTitle: generateEditor.title,
+          promptSource: generateEditor.promptSource,
+          sources: generateEditor.sources,
+        })
+      : rawPrompt;
 
     setSaving(true);
     setGeneratingItemId(generateEditor.itemId);
@@ -850,6 +960,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
         await persistEdits();
         setIsDirty(false);
       }
+      saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/regenerate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -860,6 +971,9 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
           source,
           workflow,
           projectOverrides: countOverrideLeaves(projectOverrides) > 0 ? projectOverrides : undefined,
+          runtimeOverrides: countRuntimeOverrideLeaves(runtimeOverrides) > 0
+            ? compactRuntimeOverrides(runtimeOverrides)
+            : undefined,
         }),
       });
       const payload = (await response.json()) as { job?: RegenerationJob; error?: string };
@@ -979,8 +1093,19 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
               <input value={workflow} onChange={(event) => setWorkflow(event.target.value)} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: "var(--muted)" }}>source / topic</label>
-              <input value={source} onChange={(event) => setSource(event.target.value)} />
+              <label style={{ fontSize: 12, color: "var(--muted)" }}>
+                {sourceInputLabel}
+              </label>
+              <input
+                value={source}
+                disabled={!sourceInputEnabled}
+                onChange={(event) => setSource(event.target.value)}
+              />
+              <div className="section-subtitle" style={{ marginTop: 4 }}>
+                {sourceInputEnabled
+                  ? "仅在从头、ASR 或 topic_seed 阶段重跑时生效。"
+                  : `当前从“${STAGE_LABELS[startFrom] ?? startFrom}”开始，已有脚本/分镜不会重新读取这里；改封面大字请编辑下方“封面显示标题”。`}
+              </div>
             </div>
             {mode === "create" ? (
               <div>
@@ -1002,6 +1127,13 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
               </button>
               <div className="section-subtitle">随本次重生成请求保存为项目级覆盖，不影响全局设置。</div>
             </div>
+
+            <TtsSettingsPanel
+              value={runtimeOverrides}
+              defaults={ttsDefaults}
+              onChange={setRuntimeOverrides}
+              disabled={saving || regenerating}
+            />
             <div className="row">
               <button className="primary-btn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
                 {saving || regenerating ? "处理中..." : "保存表单并重生成"}
@@ -1089,6 +1221,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides }
           replacingItemId={replacingItemId}
           generatingItemId={generatingItemId}
           onScriptChange={updateScriptLine}
+          onScriptTitleChange={updateScriptTitle}
           onScriptCoverNarrationChange={updateScriptCoverNarration}
           onShotChange={updateShot}
           onImageChange={updateImage}
@@ -1150,6 +1283,7 @@ function GroupedTopicEditor({
   replacingItemId,
   generatingItemId,
   onScriptChange,
+  onScriptTitleChange,
   onScriptCoverNarrationChange,
   onShotChange,
   onImageChange,
@@ -1165,11 +1299,17 @@ function GroupedTopicEditor({
   replacingItemId: string | null;
   generatingItemId: string | null;
   onScriptChange: (lineIndex: number, key: keyof ScriptLine, value: string) => void;
+  onScriptTitleChange: (value: string) => void;
   onScriptCoverNarrationChange: (value: string) => void;
   onShotChange: (shotIndex: number, key: keyof Shot, value: string) => void;
   onImageChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
   onImageReplace: (itemId: string, title: string, file: File) => void;
-  onImageGenerate: (itemId: string, title: string, prompt: string) => void;
+  onImageGenerate: (
+    itemId: string,
+    title: string,
+    sources: PromptSources,
+    preferredSources: PromptSource[],
+  ) => void;
   onImageDelete: (kind: "cover" | "shot", shotIndex: number | undefined) => void;
   onImageZoom: (title: string, src: string) => void;
 }) {
@@ -1182,10 +1322,6 @@ function GroupedTopicEditor({
   if (shotCount === 0 && !images?.cover) {
     return <div className="sub-panel" style={{ marginTop: 12 }}>未找到可审核的分镜信息。</div>;
   }
-
-  const buildPrompt = (image: ImageEntry, fallback: string): string => {
-    return image.prompt || image.query || fallback;
-  };
 
   return (
     <div className="shot-review-stack">
@@ -1205,7 +1341,14 @@ function GroupedTopicEditor({
               onGenerate={() => onImageGenerate(
                 `topic_${images.topic_index}_cover`,
                 "封面图片",
-                buildPrompt(images.cover!, `${images.title}, vertical 9:16 documentary science cover image`),
+                {
+                  title: sourceText(script?.title ?? images.title),
+                  narration: sourceText(script?.cover_narration),
+                  query: sourceText(images.cover?.query),
+                  prompt: sourceText(images.cover?.prompt),
+                  fallback: `${images.title}, vertical 9:16 documentary science cover image`,
+                },
+                ["query", "prompt", "title", "narration", "fallback"],
               )}
               onDelete={() => onImageDelete("cover", undefined)}
               onZoom={(src) => onImageZoom("封面图片", src)}
@@ -1215,8 +1358,13 @@ function GroupedTopicEditor({
             {script ? (
               <div className="field-group">
                 <div className="field-group-title">口播文案</div>
+                <FieldInput
+                  label="封面显示标题 / script.title（控制 MP4 封面大字和正文顶部标题）"
+                  value={script.title}
+                  onChange={onScriptTitleChange}
+                />
                 <FieldTextarea
-                  label="cover_narration（朗读标题，疑问句式；留空则 tts 阶段用标题+？兜底）"
+                  label="cover_narration（只控制封面朗读，不控制画面大字；留空则 tts 阶段用标题+？兜底）"
                   value={script.cover_narration ?? ""}
                   onChange={(value) => onScriptCoverNarrationChange(value)}
                 />
@@ -1286,16 +1434,24 @@ function GroupedTopicEditor({
                       onGenerate={() => imageItemId && onImageGenerate(
                         imageItemId,
                         `shot ${image.shot_index}`,
-                        buildPrompt(
-                          image,
-                          [
+                        {
+                          title: sourceText(script?.title ?? board?.title ?? images?.title),
+                          visual: sourceText(shot?.visual),
+                          narration: sourceText(shot?.narration),
+                          script: sourceText(line?.text),
+                          broll: sourceText(shot?.broll),
+                          subtitle: sourceText(shot?.subtitle),
+                          query: sourceText(image.query),
+                          prompt: sourceText(image.prompt),
+                          fallback: [
                             shot?.visual,
                             shot?.broll,
                             shot?.subtitle,
                             line?.text,
                             "vertical 9:16 documentary science image",
                           ].filter(Boolean).join(", "),
-                        ),
+                        },
+                        ["visual", "narration", "script", "query", "prompt", "fallback"],
                       )}
                       onDelete={() => onImageDelete("shot", image.shot_index)}
                       onZoom={(src) => onImageZoom(`shot ${image.shot_index}`, src)}
@@ -1430,6 +1586,7 @@ function ImageActionPanel({
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const [pasteMessage, setPasteMessage] = useState("");
   const imageSrc = image.image_path ? assetUrl(image.image_path, imageToken) : "";
 
   const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -1443,8 +1600,25 @@ function ImageActionPanel({
         continue;
       }
       event.preventDefault();
+      setPasteMessage("");
       onReplace(file);
       return;
+    }
+  };
+
+  const pasteFromClipboard = async () => {
+    setPasteMessage("");
+    try {
+      const file = await readImageFileFromClipboard();
+      if (!file) {
+        panelRef.current?.focus();
+        setPasteMessage("未读取到剪贴板图片。请先复制图片，再点击粘贴；或点击本区域后按 Ctrl/Cmd + V。");
+        return;
+      }
+      onReplace(file);
+    } catch {
+      panelRef.current?.focus();
+      setPasteMessage("浏览器未允许直接读取剪贴板。请点击本区域后按 Ctrl/Cmd + V，或使用上传。");
     }
   };
 
@@ -1485,8 +1659,8 @@ function ImageActionPanel({
         <button type="button" className="secondary compact-btn" disabled={generating} onClick={onGenerate}>
           {generating ? "生成中" : "生图"}
         </button>
-        <button type="button" className="secondary compact-btn" disabled={replacing} onClick={() => panelRef.current?.focus()}>
-          粘贴
+        <button type="button" className="secondary compact-btn" disabled={replacing} onClick={pasteFromClipboard}>
+          粘贴图片
         </button>
         <button
           type="button"
@@ -1501,7 +1675,9 @@ function ImageActionPanel({
           删除
         </button>
       </div>
-      <div className="image-action-hint">点击此区域后可直接粘贴图片。ID: {itemId}</div>
+      <div className="image-action-hint">
+        {pasteMessage || `可点击“粘贴图片”，也可点此区域后按 Ctrl/Cmd + V。ID: ${itemId}`}
+      </div>
     </div>
   );
 }
@@ -1519,6 +1695,14 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
   const previewSrc = editor.previewImageBase64
     ? `data:${editor.previewContentType ?? "image/jpeg"};base64,${editor.previewImageBase64}`
     : "";
+  const effectivePrompt = editor.useContextPrompt
+    ? buildContextualImagePrompt({
+        corePrompt: editor.prompt,
+        itemTitle: editor.title,
+        promptSource: editor.promptSource,
+        sources: editor.sources,
+      })
+    : editor.prompt;
 
   return (
     <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
@@ -1573,6 +1757,49 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
             />
           </div>
           <div className="form-row">
+            <label className="form-label">文案来源</label>
+            <select
+              value={editor.promptSource}
+              disabled={busy}
+              onChange={(event) => {
+                const promptSource = event.target.value as PromptSource;
+                onChange({
+                  ...editor,
+                  promptSource,
+                  prompt: editor.sources[promptSource] ?? editor.prompt,
+                  previewImageBase64: undefined,
+                  previewContentType: undefined,
+                  previewMetadata: undefined,
+                });
+              }}
+            >
+              {(Object.keys(PROMPT_SOURCE_LABELS) as PromptSource[]).map((source) => {
+                const value = editor.sources[source];
+                return (
+                  <option key={source} value={source} disabled={!value}>
+                    {PROMPT_SOURCE_LABELS[source]}
+                    {value ? "" : "（无）"}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={editor.useContextPrompt}
+              disabled={busy}
+              onChange={(event) => onChange({
+                ...editor,
+                useContextPrompt: event.target.checked,
+                previewImageBase64: undefined,
+                previewContentType: undefined,
+                previewMetadata: undefined,
+              })}
+            />
+            <span>上下文增强</span>
+          </label>
+          <div className="form-row">
             <label className="form-label">prompt</label>
             <textarea
               value={editor.prompt}
@@ -1587,6 +1814,12 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
               })}
             />
           </div>
+          {editor.useContextPrompt ? (
+            <div className="form-row">
+              <label className="form-label">最终发送 prompt</label>
+              <textarea value={effectivePrompt} readOnly rows={7} />
+            </div>
+          ) : null}
           <div className="image-generate-preview-slot">
             {previewSrc ? (
               <img src={previewSrc} alt="AI 生成预览" />
@@ -1776,6 +2009,20 @@ function ImageCropModal({ editor, busy, onClose, onSave, onPickAnother }: ImageC
     }
   };
 
+  const pasteAnother = async () => {
+    setLocalMessage("");
+    try {
+      const file = await readImageFileFromClipboard();
+      if (!file) {
+        setLocalMessage("未读取到剪贴板图片。请先复制图片，再点击从剪贴板换图。");
+        return;
+      }
+      onPickAnother(file);
+    } catch {
+      setLocalMessage("浏览器未允许直接读取剪贴板。请按 Ctrl/Cmd + V，或选择本地图片。");
+    }
+  };
+
   return (
     <div className="crop-modal-backdrop">
       <div className="panel crop-modal">
@@ -1852,6 +2099,9 @@ function ImageCropModal({ editor, busy, onClose, onSave, onPickAnother }: ImageC
               />
               <button className="secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
                 选择另一张图
+              </button>
+              <button className="secondary" disabled={busy} onClick={pasteAnother}>
+                从剪贴板换图
               </button>
               <button className="primary" disabled={busy || !size} onClick={saveCropped}>
                 保存裁剪并替换

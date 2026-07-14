@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -107,6 +108,41 @@ def _optional_env(key: str) -> str | None:
     return v if v else None
 
 
+def _project_runtime_tts_overrides() -> dict:
+    raw = os.getenv("KB_PROJECT_RUNTIME_OVERRIDES")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    tts = parsed.get("tts")
+    return tts if isinstance(tts, dict) else {}
+
+
+def _runtime_tts_env(
+    overrides: dict,
+    field_names: tuple[str, ...],
+    env_key: str,
+    default: str | None = None,
+) -> str:
+    for field_name in field_names:
+        value = overrides.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return _env(env_key, default)
+
+
+def _normalize_volc_model_speaker(model: str, speaker: str) -> tuple[str, str]:
+    # BigTTS voice IDs are speakers, not X-Api-Resource-Id values.
+    # Keep older mistaken env/project settings usable by moving them into speaker.
+    if model.startswith("zh_") and model.endswith("_bigtts"):
+        return "seed-tts-2.0", model
+    return model, speaker
+
+
 def _resolve_optional_path(v: str | None) -> Path | None:
     if not v:
         return None
@@ -142,12 +178,37 @@ def _tts_speed() -> float:
 def load_config() -> Config:
     # Web 服务进程可能持有启动时的旧 env；每次加载配置时让 .env 重新成为当前运行配置。
     load_dotenv(override=True)
+    runtime_tts = _project_runtime_tts_overrides()
     project_root = Path(__file__).resolve().parent.parent
     profile = load_style_profile(
         project_root,
         _env("KB_STYLE_PROFILE", "serious_science"),
         _optional_env("KB_STYLE_PROFILE_PATH"),
     )
+    tts_provider = _runtime_tts_env(runtime_tts, ("provider",), "KB_TTS_PROVIDER", "edge").lower()
+    generic_model = runtime_tts.get("model") if isinstance(runtime_tts.get("model"), str) else None
+    generic_speaker = runtime_tts.get("speaker") if isinstance(runtime_tts.get("speaker"), str) else None
+    volc_model, volc_speaker = _normalize_volc_model_speaker(
+        (generic_model.strip() if tts_provider == "volcengine" and generic_model and generic_model.strip() else _runtime_tts_env(
+            runtime_tts,
+            ("volcModel", "volc_model"),
+            "KB_VOLC_TTS_MODEL",
+            "seed-tts-2.0",
+        )),
+        (generic_speaker.strip() if tts_provider == "volcengine" and generic_speaker and generic_speaker.strip() else _runtime_tts_env(
+            runtime_tts,
+            ("volcSpeaker", "volc_speaker"),
+            "KB_VOLC_TTS_SPEAKER",
+            "zh_female_xiaohe_uranus_bigtts",
+        )),
+    )
+    edge_voice = generic_speaker.strip() if tts_provider == "edge" and generic_speaker and generic_speaker.strip() else _runtime_tts_env(
+        runtime_tts, ("voice",), "KB_TTS_VOICE", "zh-CN-XiaoxiaoNeural"
+    )
+    openai_model = generic_model.strip() if tts_provider == "openai" and generic_model and generic_model.strip() else _env("KB_OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+    openai_voice = generic_speaker.strip() if tts_provider == "openai" and generic_speaker and generic_speaker.strip() else _env("KB_OPENAI_TTS_VOICE", "alloy")
+    minimax_model = generic_model.strip() if tts_provider == "minimax" and generic_model and generic_model.strip() else _env("KB_MINIMAX_TTS_MODEL", "speech-02-turbo")
+    minimax_voice_id = generic_speaker.strip() if tts_provider == "minimax" and generic_speaker and generic_speaker.strip() else _env("KB_MINIMAX_TTS_VOICE_ID", "Chinese (Mandarin)_News_Anchor")
     return Config(
         llm=LLMConfig(
             base_url=_env("KB_LLM_BASE_URL"),
@@ -164,8 +225,8 @@ def load_config() -> Config:
             local_device=_env("KB_ASR_LOCAL_DEVICE", "cpu"),
         ),
         tts=TTSConfig(
-            provider=_env("KB_TTS_PROVIDER", "edge").lower(),
-            voice=_env("KB_TTS_VOICE", "zh-CN-XiaoxiaoNeural"),
+            provider=tts_provider,
+            voice=edge_voice,
             rate=_env("KB_TTS_RATE", "+0%"),
             volume=_env("KB_TTS_VOLUME", "+0%"),
             speed=_tts_speed(),
@@ -173,15 +234,15 @@ def load_config() -> Config:
             openai_api_key=_optional_env("KB_OPENAI_TTS_API_KEY")
             or _optional_env("OPENAI_API_KEY"),
             openai_base_url=_env("KB_OPENAI_TTS_BASE_URL", "https://api.openai.com/v1"),
-            openai_model=_env("KB_OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
-            openai_voice=_env("KB_OPENAI_TTS_VOICE", "alloy"),
+            openai_model=openai_model,
+            openai_voice=openai_voice,
             volc_api_key=_optional_env("KB_VOLC_TTS_API_KEY"),
-            volc_model=_env("KB_VOLC_TTS_MODEL", "seed-tts-2.0"),
+            volc_model=volc_model,
             volc_url=_env(
                 "KB_VOLC_TTS_URL",
                 "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
             ),
-            volc_speaker=_env("KB_VOLC_TTS_SPEAKER", "zh_female_xiaohe_uranus_bigtts"),
+            volc_speaker=volc_speaker,
             volc_context=_env(
                 "KB_VOLC_TTS_CONTEXT",
                 "自然、清晰、克制的中文科普男声，语速适中，不要背景音乐和音效。",
@@ -192,8 +253,8 @@ def load_config() -> Config:
             volc_pitch_rate=int(_env("KB_VOLC_TTS_PITCH_RATE", "0")),
             minimax_api_key=_optional_env("KB_MINIMAX_TTS_API_KEY"),
             minimax_group_id=_optional_env("KB_MINIMAX_TTS_GROUP_ID"),
-            minimax_model=_env("KB_MINIMAX_TTS_MODEL", "speech-02-turbo"),
-            minimax_voice_id=_env("KB_MINIMAX_TTS_VOICE_ID", "Chinese (Mandarin)_News_Anchor"),
+            minimax_model=minimax_model,
+            minimax_voice_id=minimax_voice_id,
             minimax_url=_env("KB_MINIMAX_TTS_URL", "https://api.minimaxi.com/v1/t2a_v2"),
         ),
         intro=IntroConfig(

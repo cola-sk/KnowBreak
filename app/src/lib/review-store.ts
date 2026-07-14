@@ -12,6 +12,7 @@ import type {
   ReviewStatus,
   VersionSummary,
 } from "@/lib/types";
+import type { ProjectRuntimeOverrides } from "@/lib/tts-settings";
 
 const ARTIFACT_FILE: Record<ArtifactStage, string> = {
   script: "scripts.json",
@@ -49,6 +50,7 @@ const PIPELINE_ARTIFACTS: Record<string, string> = {
 };
 const VERSION_FLAGS_FILE = "_version_flags.json";
 const REGENERATION_JOB_FILE = "regenerate_job.json";
+const PROJECT_RUNTIME_OVERRIDES_FILE = "project_runtime_overrides.json";
 const REVIEW_STAGE_ORDER: ReviewStage[] = ["script_review", "storyboard_review", "image_review"];
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
@@ -348,6 +350,7 @@ export interface ProductionReviewData {
   job: RegenerationJob | null;
   regenerationJobs: RegenerationJob[];
   projectOverrides?: Record<string, any>;
+  runtimeOverrides?: ProjectRuntimeOverrides;
 }
 
 async function readArtifact(videoId: string, version: string, stage: ArtifactStage): Promise<unknown | null> {
@@ -606,6 +609,9 @@ export async function getProductionReviewData(
   }
 
   const projectOverrides = (await readJsonFile<Record<string, any>>(path.join(versionDir, "project_profile_overrides.json"))) || {};
+  const runtimeOverrides = (await readJsonFile<ProjectRuntimeOverrides>(
+    path.join(versionDir, PROJECT_RUNTIME_OVERRIDES_FILE),
+  )) || {};
 
   return {
     videoId,
@@ -629,6 +635,7 @@ export async function getProductionReviewData(
     job: await readRegenerationJob(videoId, version),
     regenerationJobs: await listRegenerationJobs(videoId, version),
     projectOverrides,
+    runtimeOverrides,
   };
 }
 
