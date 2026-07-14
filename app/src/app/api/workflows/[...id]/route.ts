@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { deleteCustomWorkflow, readWorkflowDetail } from "@/lib/workflow-store";
+import { deleteEditableWorkflow, readWorkflowDetail } from "@/lib/workflow-store";
 
 export const runtime = "nodejs";
 
@@ -24,7 +24,7 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
-    await deleteCustomWorkflow(id);
+    await deleteEditableWorkflow(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

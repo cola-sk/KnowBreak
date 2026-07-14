@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
-import { TtsSettingsPanel } from "@/components/tts-settings-panel";
 import { readImageFileFromClipboard } from "@/lib/clipboard-image";
 import { buildContextualImagePrompt } from "@/lib/image-generation-prompt";
 import type { ArtifactStage, RegenerationJob, RegenerationJobDetail, ReviewFile, ReviewStage } from "@/lib/types";
@@ -330,6 +329,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   const [runtimeOverrides, setRuntimeOverrides] = useState<ProjectRuntimeOverrides>(() => initial.runtimeOverrides ?? {});
   const [showConfig, setShowConfig] = useState(false);
   const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
+  const projectConfigOverrideCount = countOverrideLeaves(projectOverrides) + countRuntimeOverrideLeaves(runtimeOverrides);
 
   const selectedVideo = useMemo(() => {
     return data.videos.find((video) => video.topic_index === topicIndex) ?? data.videos[0] ?? null;
@@ -1197,18 +1197,11 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
                 onClick={() => setShowConfig(true)}
                 style={{ width: "100%", justifyContent: "space-between", fontSize: 12, padding: "8px 12px" }}
               >
-                <span>自定义项目专属参数 {countOverrideLeaves(projectOverrides) > 0 ? `(${countOverrideLeaves(projectOverrides)} 项修改)` : ""}</span>
-                <span>打开可视化设置</span>
+                <span>自定义项目专属参数 {projectConfigOverrideCount > 0 ? `(${projectConfigOverrideCount} 项修改)` : ""}</span>
+                <span>打开封面 / 内容 / TTS</span>
               </button>
-              <div className="section-subtitle">随本次重生成请求保存为项目级覆盖，不影响全局设置。</div>
+              <div className="section-subtitle">随本次重生成请求保存为项目级修改，不影响全局设置。</div>
             </div>
-
-            <TtsSettingsPanel
-              value={runtimeOverrides}
-              defaults={ttsDefaults}
-              onChange={setRuntimeOverrides}
-              disabled={saving || regenerating}
-            />
             <div className="row">
               <button className="primary-btn" disabled={saving || regenerating} onClick={() => regenerate(true)}>
                 {saving || regenerating ? "处理中..." : "保存表单并重生成"}
@@ -1343,6 +1336,10 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
           base={inheritedProfile}
           value={projectOverrides}
           onChange={setProjectOverrides}
+          ttsValue={runtimeOverrides}
+          ttsDefaults={ttsDefaults}
+          onTtsChange={setRuntimeOverrides}
+          ttsDisabled={saving || regenerating}
           onClose={() => setShowConfig(false)}
         />
       ) : null}

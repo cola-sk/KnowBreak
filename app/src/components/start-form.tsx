@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useMemo } from "react";
 
 import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
-import { TtsSettingsPanel } from "@/components/tts-settings-panel";
 import type { WorkflowSummary } from "@/lib/review-store";
 import {
   compactRuntimeOverrides,
@@ -71,6 +70,7 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
   const [runtimeOverrides, setRuntimeOverrides] = useState<ProjectRuntimeOverrides>({});
   const [showConfig, setShowConfig] = useState(false);
   const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
+  const projectConfigOverrideCount = countOverrideLeaves(projectOverrides) + countRuntimeOverrideLeaves(runtimeOverrides);
 
   useEffect(() => {
     const raw = window.sessionStorage.getItem(START_PRESET_STORAGE_KEY);
@@ -264,11 +264,11 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
           onClick={() => setShowConfig(true)}
           style={{ width: "100%", justifyContent: "space-between", padding: "12px 18px" }}
         >
-          <span>自定义当前项目专属参数 {countOverrideLeaves(projectOverrides) > 0 ? `(${countOverrideLeaves(projectOverrides)} 项修改)` : ""}</span>
-          <span>打开可视化设置</span>
+          <span>自定义当前项目专属参数 {projectConfigOverrideCount > 0 ? `(${projectConfigOverrideCount} 项修改)` : ""}</span>
+          <span>打开封面 / 内容 / TTS</span>
         </button>
         <div className="section-subtitle">
-          仅对本次启动任务生效；未设置的字段继承全局配置。
+          仅对本次启动任务生效；未修改字段使用当前默认配置。
         </div>
       </div>
 
@@ -279,16 +279,13 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
           base={inheritedProfile}
           value={projectOverrides}
           onChange={setProjectOverrides}
+          ttsValue={runtimeOverrides}
+          ttsDefaults={ttsDefaults}
+          onTtsChange={setRuntimeOverrides}
+          ttsDisabled={submitting}
           onClose={() => setShowConfig(false)}
         />
       ) : null}
-
-      <TtsSettingsPanel
-        value={runtimeOverrides}
-        defaults={ttsDefaults}
-        onChange={setRuntimeOverrides}
-        disabled={submitting}
-      />
 
       <div className="form-actions">
         <button

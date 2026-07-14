@@ -94,10 +94,21 @@ function validateVersion(version: string): string {
 
 function validateWorkflowName(workflow: string): string {
   const segments = workflow.split("/");
-  if (segments.length === 0 || segments.some((segment) => !SAFE_SEGMENT_RE.test(segment))) {
+  if (segments.length === 0 || segments.some((segment) => !isSafeWorkflowSegment(segment))) {
     throw new Error("workflow 名称非法");
   }
   return workflow;
+}
+
+function isSafeWorkflowSegment(segment: string): boolean {
+  const value = segment.trim();
+  return Boolean(value)
+    && value === segment
+    && value !== "."
+    && value !== ".."
+    && !value.includes("/")
+    && !value.includes("\\")
+    && !value.includes("\0");
 }
 
 async function nextVersion(videoId: string): Promise<string> {

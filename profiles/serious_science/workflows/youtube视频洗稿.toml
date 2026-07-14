@@ -1,4 +1,4 @@
-id = "rewrite_same_structure"
+id = "youtube视频洗稿"
 description = "按原视频结构洗稿：不重新拆知识点和选题，保持原结构改写成 1 条视频。"
 
 steps = [

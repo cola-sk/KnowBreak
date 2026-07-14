@@ -49,6 +49,17 @@ function reviewBadge(status: ReviewStatus | undefined): string {
   return "badge";
 }
 
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}/${month}/${day}`;
+}
+
 function filterProjects(projects: ProjectSummary[], filter: FilterMode): ProjectSummary[] {
   return projects
     .map((project) => {
@@ -249,9 +260,6 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
                           {v.ignored && <span className="badge warning">已忽略</span>}
                         </div>
                         <div className="version-header-side">
-                          <time className="version-time">
-                            {new Date(v.updatedAt).toLocaleDateString()} {new Date(v.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          </time>
                           <VersionActions
                             videoId={project.videoId}
                             version={v.version}
@@ -277,6 +285,9 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
                           <span className={reviewBadge(v.review.image_review)}>图片: {v.review.image_review ?? "pending"}</span>
                         </div>
                       </div>
+                      <time className="version-time version-time-bottom">
+                        {formatDate(v.updatedAt)}
+                      </time>
 
                     </div>
                   );

@@ -339,6 +339,32 @@ textarea {
   outline: none;
 }
 
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+  background-size: 1.2rem;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+select option {
+  background-color: var(--panel);
+  color: var(--ink);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: light-dark(#f1f5f9, rgba(255, 255, 255, 0.02));
+  border-color: var(--panel-border);
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   width: auto;
@@ -599,6 +625,16 @@ a.tab.active {
   gap: 12px;
 }
 
+.workflow-editor-head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.workflow-editor-head > div:first-child {
+  min-width: min(420px, 100%);
+  flex: 1 1 420px;
+}
+
 .workflow-sidebar-head {
   padding: 18px;
   border-bottom: 1px solid var(--line);
@@ -694,8 +730,52 @@ a.tab.active {
 .workflow-actions {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.workflow-actions .btn {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.danger-link-btn {
+  min-height: auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.danger-link-btn:hover:not(:disabled) {
+  text-decoration: underline;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workflow-title-edit {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workflow-title-edit .section-title {
+  overflow-wrap: anywhere;
+}
+
+.workflow-title-input {
+  width: min(520px, 100%);
+  min-width: min(360px, 100%);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
 }
 
 .compact-btn {
@@ -773,6 +853,42 @@ a.tab.active {
   background: var(--panel);
   color: var(--ink);
   box-shadow: var(--shadow-sm);
+}
+
+.config-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  width: 100%;
+  padding: 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.config-category-tabs button {
+  min-height: 38px;
+  padding: 8px 12px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-bottom: -1px;
+}
+
+.config-category-tabs button:hover {
+  color: var(--ink);
+}
+
+.config-category-tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: transparent;
+  box-shadow: none;
 }
 
 .visual-config-grid {
@@ -1082,7 +1198,8 @@ a.tab.active {
 .project-config-modal-body {
   min-height: 0;
   overflow: auto;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   padding-right: 4px;
 }
@@ -1098,6 +1215,11 @@ a.tab.active {
 .tts-config-body {
   overflow: visible;
   padding-right: 0;
+}
+
+.tts-inline-editor {
+  display: grid;
+  gap: 14px;
 }
 
 .tts-config-form {
@@ -1281,6 +1403,13 @@ a.tab.active {
   color: var(--muted);
   font-size: 13px;
   background: var(--panel);
+}
+
+.workflow-empty-detail {
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  text-align: center;
 }
 
 .prompt-source-grid {
@@ -1710,12 +1839,19 @@ a.tab.active {
   display: grid;
   justify-items: end;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .version-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.version-time-bottom {
+  display: block;
+  margin-top: 10px;
+  text-align: right;
 }
 
 .version-stages {

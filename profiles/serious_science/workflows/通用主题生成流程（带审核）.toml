@@ -1,5 +1,5 @@
-id = "typhoon_turn"
-description = "主题绑定 workflow：台风为什么经常变向。带有人工审核闸门（脚本/分镜/图片分别审核后再继续）。"
+id = "通用主题生成流程（带审核）"
+description = "手工主题直出（含人工审核闸门）：脚本/分镜/图片逐步审核后再合成。"
 
 steps = [
   "topic_seed",
@@ -14,12 +14,12 @@ steps = [
 ]
 
 [capabilities.topic_seed]
-params = { topic = "台风为什么经常变向", hook = "为什么本该直奔陆地的台风，经常在海上走出秦王绕柱的S型走位？", angle = "从奇葩路径台风切入，通过通俗的力学与气象学原理解析台风移动机制，科普副热带高压、藤原效应、地形影响和秋台风多变原因，降低公众对气象预报的误解", target_duration = "120" }
+prompt = "prompts/topic_seed.md"
 inputs = []
 outputs = ["topics.json"]
 
 [capabilities.script]
-prompt = "prompts/topics/typhoon_turn/script.md"
+prompt = "prompts/script.md"
 inputs = ["topics.json"]
 outputs = ["scripts.json"]
 

@@ -12,8 +12,6 @@ import {
 } from "@/lib/review-store";
 
 const PROFILE_NAME = "serious_science";
-const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
-const WORKFLOW_SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const PROMPT_STAGES = new Set(["extract", "topics", "rewrite", "topic_seed", "script", "storyboard", "assets", "images"]);
 
 export type PromptSourceType = "default" | "existing" | "custom";
@@ -83,9 +81,20 @@ function promptsDir(profileName = PROFILE_NAME): string {
 }
 
 function assertSafeSegments(segments: string[]): void {
-  if (segments.length === 0 || segments.some((segment) => !SAFE_SEGMENT_RE.test(segment) || segment === "." || segment === "..")) {
+  if (segments.length === 0 || segments.some((segment) => !isSafeWorkflowSegment(segment))) {
     throw new Error("workflow 路径非法");
   }
+}
+
+function isSafeWorkflowSegment(segment: string): boolean {
+  const value = segment.trim();
+  return Boolean(value)
+    && value === segment
+    && value !== "."
+    && value !== ".."
+    && !value.includes("/")
+    && !value.includes("\\")
+    && !value.includes("\0");
 }
 
 function normalizeWorkflowPath(
@@ -365,9 +374,10 @@ export async function saveCustomWorkflow(body: WorkflowSaveRequest, profileName 
 }
 
 export async function saveEditableWorkflow(body: WorkflowSaveRequest, profileName = PROFILE_NAME): Promise<WorkflowDetail> {
+  const original = body.path?.trim() ? normalizeExistingPath(body.path.trim()) : null;
   const target = normalizeSaveTarget(body);
-  if (!WORKFLOW_SLUG_RE.test(target.slug)) {
-    throw new Error("workflow ID 只能使用小写英文、数字、下划线或中划线，且必须以字母或数字开头");
+  if (!isSafeWorkflowSegment(target.slug)) {
+    throw new Error("workflow 文件名不能为空，且不能包含 /、反斜杠或路径穿越符号");
   }
   const steps = normalizeSteps(body.steps);
   const workflowPath = target.storage === "builtin" ? target.slug : `${target.storage}/${target.slug}`;
@@ -389,26 +399,36 @@ export async function saveEditableWorkflow(body: WorkflowSaveRequest, profileNam
   const filePath = target.storage === "builtin"
     ? path.join(workflowsDir(profileName), `${target.slug}.toml`)
     : path.join(workflowsDir(profileName), target.storage, `${target.slug}.toml`);
+  const originalFilePath = original
+    ? original.storage === "builtin"
+      ? path.join(workflowsDir(profileName), `${original.slug}.toml`)
+      : path.join(workflowsDir(profileName), original.storage, `${original.slug}.toml`)
+    : null;
+  const originalWorkflowPath = original
+    ? original.storage === "builtin" ? original.slug : `${original.storage}/${original.slug}`
+    : null;
+  if (originalFilePath && originalFilePath !== filePath && existsSync(filePath)) {
+    throw new Error(`目标 workflow 已存在: ${workflowPath}`);
+  }
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, serializeWorkflowToml(workflow), "utf-8");
+  if (originalFilePath && originalFilePath !== filePath) {
+    await fs.rm(originalFilePath, { force: true });
+    if (originalWorkflowPath) {
+      await removeOwnedPromptDir(originalWorkflowPath, profileName);
+    }
+  }
 
   return readWorkflowDetail(target.storage === "builtin" ? [target.slug] : [target.storage, target.slug], profileName);
 }
 
 function normalizeSaveTarget(body: WorkflowSaveRequest): { storage: WorkflowStorage; slug: string } {
+  const rawId = (body.id ?? "").trim();
   const rawPath = body.path?.trim();
-  if (rawPath) {
-    const parts = rawPath.split("/");
-    if (parts.length === 1) {
-      return { storage: "builtin", slug: parts[0] };
-    }
-    if ((parts[0] === "custom" || parts[0] === "topics") && parts.length === 2) {
-      return { storage: parts[0], slug: parts[1] };
-    }
-    throw new Error("只能保存根目录 workflow、custom/<id> 或 topics/<id> 工作流");
+  if (rawPath && !rawId) {
+    return normalizeExistingPath(rawPath);
   }
 
-  const rawId = (body.id ?? "").trim();
   if (rawId.startsWith("topics/")) {
     return { storage: "topics", slug: rawId.replace(/^topics\//, "") };
   }
@@ -419,6 +439,17 @@ function normalizeSaveTarget(body: WorkflowSaveRequest): { storage: WorkflowStor
     storage: body.storage === "topics" ? "topics" : body.storage === "builtin" ? "builtin" : "custom",
     slug: rawId,
   };
+}
+
+function normalizeExistingPath(rawPath: string): { storage: WorkflowStorage; slug: string } {
+  const parts = rawPath.split("/");
+  if (parts.length === 1) {
+    return { storage: "builtin", slug: parts[0] };
+  }
+  if ((parts[0] === "custom" || parts[0] === "topics") && parts.length === 2) {
+    return { storage: parts[0], slug: parts[1] };
+  }
+  throw new Error("只能保存根目录 workflow、custom/<id> 或 topics/<id> 工作流");
 }
 
 function normalizeSteps(steps: unknown): string[] {
@@ -549,12 +580,19 @@ function formatArray(values: string[]): string {
   return `[${values.map((value) => `"${escapeTomlString(value)}"`).join(", ")}]`;
 }
 
-export async function deleteCustomWorkflow(segments: string[], profileName = PROFILE_NAME): Promise<void> {
-  const { filePath, isCustom, isTopic } = normalizeWorkflowPath(segments, profileName);
-  if ((!isCustom && !isTopic) || segments.length !== 2) {
-    throw new Error("只能删除 custom/<id> 或 topics/<id> workflow");
+async function removeOwnedPromptDir(workflowPath: string, profileName: string): Promise<void> {
+  const ownPromptDir = ownPromptDirForPath(workflowPath);
+  if (!ownPromptDir) {
+    return;
   }
-  const workflowId = segments[1];
+  await fs.rm(path.join(profileDir(profileName), ownPromptDir), { recursive: true, force: true });
+}
+
+export async function deleteEditableWorkflow(segments: string[], profileName = PROFILE_NAME): Promise<void> {
+  const { cliName, filePath } = normalizeWorkflowPath(segments, profileName);
+  if (!existsSync(filePath)) {
+    throw new Error("workflow 不存在");
+  }
   await fs.rm(filePath, { force: true });
-  await fs.rm(path.join(promptsDir(profileName), isTopic ? "topics" : "custom", workflowId), { recursive: true, force: true });
+  await removeOwnedPromptDir(cliName, profileName);
 }

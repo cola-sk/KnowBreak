@@ -23,7 +23,12 @@ interface Props {
   disabled?: boolean;
 }
 
-function overridesFromSettings(settings: TtsRuntimeDefaults): ProjectRuntimeOverrides {
+interface TtsSettingsEditorProps extends Props {
+  clearLabel?: string;
+  defaultLabel?: string;
+}
+
+export function overridesFromSettings(settings: TtsRuntimeDefaults): ProjectRuntimeOverrides {
   const normalized = normalizeTtsSettings(settings);
   return {
     tts: {
@@ -54,10 +59,34 @@ function readHistory(): TtsHistoryItem[] {
 }
 
 export function TtsSettingsPanel({ value, defaults, onChange, disabled = false }: Props) {
+  return (
+    <div className="panel" style={{ padding: 12 }}>
+      <TtsSettingsEditor
+        value={value}
+        defaults={defaults}
+        onChange={onChange}
+        disabled={disabled}
+        clearLabel="恢复默认"
+        defaultLabel="默认配置"
+      />
+    </div>
+  );
+}
+
+export function TtsSettingsEditor({
+  value,
+  defaults,
+  onChange,
+  disabled = false,
+  clearLabel = "清除 TTS 修改",
+  defaultLabel = "默认配置",
+}: TtsSettingsEditorProps) {
   const [history, setHistory] = useState<TtsHistoryItem[]>([]);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const effective = effectiveTtsSettings(defaults, value);
   const currentId = ttsHistoryItemId(effective);
+  const normalizedProvider = normalizeTtsSettings(effective).provider;
+  const providerMeta = TTS_PROVIDER_OPTIONS.find((item) => item.value === normalizedProvider) ?? TTS_PROVIDER_OPTIONS[0];
+  const hasOverrides = Boolean(value.tts?.provider || value.tts?.model || value.tts?.speaker);
 
   useEffect(() => {
     setHistory(readHistory());
@@ -83,16 +112,17 @@ export function TtsSettingsPanel({ value, defaults, onChange, disabled = false }
     return merged.slice(0, 21);
   }, [defaults, effective, history, currentId]);
 
-  const onAdvancedSave = (settings: TtsRuntimeDefaults) => {
+  const commitSettings = (settings: TtsRuntimeDefaults, saveHistory = false) => {
     const normalized = normalizeTtsSettings(settings);
     onChange(overridesFromSettings(normalized));
-    saveTtsHistoryItem(normalized);
-    setHistory(readHistory());
-    setAdvancedOpen(false);
+    if (saveHistory) {
+      saveTtsHistoryItem(normalized);
+      setHistory(readHistory());
+    }
   };
 
   return (
-    <div className="panel" style={{ padding: 12, display: "grid", gap: 10 }}>
+    <div className="tts-inline-editor">
       <div>
         <div style={{ fontWeight: 700, fontSize: 14 }}>TTS 语音设置</div>
         <div className="section-subtitle">当前：{labelForTtsSettings(effective)}</div>
@@ -104,131 +134,74 @@ export function TtsSettingsPanel({ value, defaults, onChange, disabled = false }
           disabled={disabled}
           value={currentId}
           onChange={(event) => {
+            if (event.target.value === ttsHistoryItemId(defaults)) {
+              onChange({});
+              return;
+            }
             const selected = options.find((item) => ttsHistoryItemId(item) === event.target.value);
             if (selected) {
-              onChange(overridesFromSettings(selected));
+              commitSettings(selected);
             }
           }}
         >
           {options.map((item) => (
             <option key={ttsHistoryItemId(item)} value={ttsHistoryItemId(item)}>
-              {labelForTtsSettings(item)}
+              {ttsHistoryItemId(item) === ttsHistoryItemId(defaults) ? `${defaultLabel}: ` : ""}{labelForTtsSettings(item)}
             </option>
           ))}
         </select>
       </div>
 
-      <div className="row">
-        <button type="button" className="secondary compact-btn" disabled={disabled} onClick={() => setAdvancedOpen(true)}>
-          高级配置
-        </button>
+      <div className="tts-config-form">
+        <div>
+          <label>provider</label>
+          <select
+            disabled={disabled}
+            value={normalizedProvider}
+            onChange={(event) => {
+              const nextProvider = event.target.value as TtsProvider;
+              commitSettings(normalizeTtsSettings({ provider: nextProvider, model: "", speaker: "" }));
+            }}
+          >
+            {TTS_PROVIDER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label>{providerMeta.modelLabel}</label>
+          <input
+            disabled={disabled}
+            value={effective.model}
+            onChange={(event) => commitSettings({ ...effective, model: event.target.value })}
+          />
+        </div>
+
+        <div>
+          <label>{providerMeta.speakerLabel}</label>
+          <input
+            disabled={disabled}
+            value={effective.speaker}
+            onChange={(event) => commitSettings({ ...effective, speaker: event.target.value })}
+          />
+        </div>
       </div>
 
-      {advancedOpen ? (
-        <TtsAdvancedModal
-          initial={effective}
+      <div className="row">
+        <button
+          type="button"
+          className="btn secondary-btn compact-btn"
           disabled={disabled}
-          onClose={() => setAdvancedOpen(false)}
-          onSave={onAdvancedSave}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function TtsAdvancedModal({
-  initial,
-  disabled,
-  onClose,
-  onSave,
-}: {
-  initial: TtsRuntimeDefaults;
-  disabled: boolean;
-  onClose: () => void;
-  onSave: (settings: TtsRuntimeDefaults) => void;
-}) {
-  const [draft, setDraft] = useState<TtsRuntimeDefaults>(initial);
-  const normalizedProvider = normalizeTtsSettings(draft).provider;
-  const previewSettings = normalizeTtsSettings(draft);
-  const providerMeta = TTS_PROVIDER_OPTIONS.find((item) => item.value === normalizedProvider) ?? TTS_PROVIDER_OPTIONS[0];
-
-  const updateDraft = (patch: Partial<TtsRuntimeDefaults>) => {
-    setDraft((prev) => ({ ...prev, ...patch }));
-  };
-
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="project-config-modal tts-config-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tts-config-title"
-        style={{ maxWidth: 760 }}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="project-config-modal-head">
-          <div>
-            <div id="tts-config-title" className="section-title">TTS 高级配置</div>
-            <div className="section-subtitle">{labelForTtsSettings(previewSettings)}</div>
-          </div>
-          <button type="button" className="btn secondary-btn compact-btn" onClick={onClose}>
-            关闭
-          </button>
-        </div>
-
-        <div className="project-config-modal-body tts-config-body">
-          <div className="tts-config-form">
-          <div>
-            <label style={{ fontSize: 12, color: "var(--muted)" }}>provider</label>
-            <select
-              disabled={disabled}
-              value={normalizedProvider}
-              onChange={(event) => {
-                const nextProvider = event.target.value as TtsProvider;
-                setDraft(normalizeTtsSettings({ provider: nextProvider, model: "", speaker: "" }));
-              }}
-            >
-              {TTS_PROVIDER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label style={{ fontSize: 12, color: "var(--muted)" }}>{providerMeta.modelLabel}</label>
-            <input
-              disabled={disabled}
-              value={draft.model}
-              onChange={(event) => updateDraft({ model: event.target.value })}
-            />
-          </div>
-
-          <div>
-            <label style={{ fontSize: 12, color: "var(--muted)" }}>{providerMeta.speakerLabel}</label>
-            <input
-              disabled={disabled}
-              value={draft.speaker}
-              onChange={(event) => updateDraft({ speaker: event.target.value })}
-            />
-          </div>
-          </div>
-
-          <div className="tts-config-actions">
-            <button
-              type="button"
-              className="btn primary-btn compact-btn"
-              disabled={disabled}
-              onClick={() => onSave(previewSettings)}
-            >
-              保存
-            </button>
-            <button type="button" className="btn secondary-btn compact-btn" disabled={disabled} onClick={onClose}>
-              取消
-            </button>
-          </div>
-        </div>
+          onClick={() => commitSettings(effective, true)}
+        >
+          保存为常用配置
+        </button>
+        <button type="button" className="btn secondary-btn compact-btn" disabled={disabled || !hasOverrides} onClick={() => onChange({})}>
+          {clearLabel}
+        </button>
       </div>
     </div>
   );

@@ -20,7 +20,6 @@ import {
 
 export const runtime = "nodejs";
 
-const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 const URL_RE = /^(https?:\/\/|youtu\.be\/|youtube\.com)/i;
 
 interface StartRequest {
@@ -32,10 +31,21 @@ interface StartRequest {
 
 function validateWorkflow(workflow: string): string {
   const segments = workflow.split("/");
-  if (segments.length === 0 || segments.some((segment) => !SAFE_SEGMENT_RE.test(segment))) {
+  if (segments.length === 0 || segments.some((segment) => !isSafeWorkflowSegment(segment))) {
     throw new Error("workflow 名称非法");
   }
   return workflow;
+}
+
+function isSafeWorkflowSegment(segment: string): boolean {
+  const value = segment.trim();
+  return Boolean(value)
+    && value === segment
+    && value !== "."
+    && value !== ".."
+    && !value.includes("/")
+    && !value.includes("\\")
+    && !value.includes("\0");
 }
 
 function resolveSource(input: string): { source: string; kind: "url" | "topic" } {

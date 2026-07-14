@@ -78,7 +78,6 @@ function defaultCapability(stage: string): EditableCapability {
       ? {
           prompt: `prompts/${stage}.md`,
           promptSourceType: "default" as PromptSourceType,
-          promptContent: "",
         }
       : {}),
   };
@@ -94,6 +93,19 @@ function createBlankWorkflow(): WorkflowDetail {
     description: "",
     steps: [...DEFAULT_REVIEW_FLOW],
     capabilities,
+    path: "",
+    isCustom: true,
+    isTopic: false,
+    isEditable: true,
+  };
+}
+
+function createEmptyWorkflow(): WorkflowDetail {
+  return {
+    id: "",
+    description: "",
+    steps: [],
+    capabilities: {},
     path: "",
     isCustom: true,
     isTopic: false,
@@ -128,22 +140,28 @@ function defaultPromptPath(stage: string): string {
   return `prompts/${stage}.md`;
 }
 
+function workflowApiPath(workflowPath: string): string {
+  return workflowPath.split("/").map(encodeURIComponent).join("/");
+}
+
 export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEditorProps) {
   const [workflows, setWorkflows] = useState(initialWorkflows);
   const [availablePrompts, setAvailablePrompts] = useState(initialPrompts);
   const [selectedPath, setSelectedPath] = useState<string>("");
-  const [workflow, setWorkflow] = useState<WorkflowDetail>(createBlankWorkflow());
-  const [activeStage, setActiveStage] = useState(DEFAULT_REVIEW_FLOW[0]);
-  const [isNew, setIsNew] = useState(true);
+  const [workflow, setWorkflow] = useState<WorkflowDetail>(createEmptyWorkflow());
+  const [activeStage, setActiveStage] = useState("");
+  const [isNew, setIsNew] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [promptModal, setPromptModal] = useState<{ stage: string; initialDraft: string } | null>(null);
+  const [nameEditing, setNameEditing] = useState(true);
+  const [nameDraft, setNameDraft] = useState("");
+  const [promptModal, setPromptModal] = useState<{ stage: string; draft: string } | null>(null);
 
   const currentCapability = workflow.capabilities[activeStage] ?? defaultCapability(activeStage);
-  const currentPromptSource = currentCapability.promptSourceType ?? "default";
-  const canSave = workflowSlug(workflow).trim().length > 0 && workflow.steps.length > 0;
+  const effectiveWorkflowSlug = (nameEditing ? nameDraft : workflowSlug(workflow)).trim();
+  const canSave = effectiveWorkflowSlug.length > 0 && workflow.steps.length > 0;
 
   const availableStageOptions = useMemo(
     () => STAGE_OPTIONS.filter((stage) => !workflow.steps.includes(stage)),
@@ -203,13 +221,15 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`/api/workflows/${path}`);
+      const response = await fetch(`/api/workflows/${workflowApiPath(path)}`);
       const payload = (await response.json()) as { workflow?: WorkflowDetail; error?: string };
       if (!response.ok || !payload.workflow) {
         throw new Error(payload.error ?? "读取 workflow 失败");
       }
       const detail = payload.workflow;
       setWorkflow(detail);
+      setNameDraft(workflowSlug(detail));
+      setNameEditing(false);
       setSelectedPath(path);
       setActiveStage(detail.steps[0] ?? "");
       setIsNew(false);
@@ -223,10 +243,23 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
   function startNew() {
     const blank = createBlankWorkflow();
     setWorkflow(blank);
+    setNameDraft("");
+    setNameEditing(true);
     setSelectedPath("");
     setActiveStage(blank.steps[0]);
     setIsNew(true);
     setNotice("");
+    setError("");
+  }
+
+  function clearSelection() {
+    setWorkflow(createEmptyWorkflow());
+    setNameDraft("");
+    setNameEditing(false);
+    setSelectedPath("");
+    setActiveStage("");
+    setIsNew(false);
+    setPromptModal(null);
     setError("");
   }
 
@@ -239,6 +272,8 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
       isTopic: false,
       isEditable: true,
     }));
+    setNameDraft("");
+    setNameEditing(true);
     setSelectedPath("");
     setIsNew(true);
     setNotice("已复制当前配置，请填写新的自定义 ID 后保存。");
@@ -342,50 +377,19 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     updateCapability(activeStage, { params });
   }
 
-  function changePromptSource(sourceType: PromptSourceType) {
-    if (sourceType === currentPromptSource) {
-      return;
-    }
-    if (sourceType === "default") {
-      const prompt = defaultPromptPath(activeStage);
-      updateCapability(activeStage, {
-        promptSourceType: "default",
-        prompt,
-        promptContent: findPromptTemplate(activeStage, prompt)?.content ?? "",
-      });
-      return;
-    }
-    if (sourceType === "existing") {
-      const existing = (availablePrompts[activeStage] ?? []).find((item) => item.sourceType !== "custom");
-      updateCapability(activeStage, {
-        promptSourceType: "existing",
-        prompt: existing?.path ?? defaultPromptPath(activeStage),
-        promptContent: existing?.content ?? "",
-      });
-      return;
-    }
-    updateCapability(activeStage, {
-      promptSourceType: "custom",
-      prompt: `${ownPromptDir(workflow)}/${activeStage}.md`,
-      promptContent: promptContentFor(activeStage, currentCapability),
-    });
-  }
-
-  function openPromptModal(stage: string) {
-    const capability = workflow.capabilities[stage] ?? defaultCapability(stage);
-    const draft = promptContentFor(stage, capability);
-    setPromptModal({ stage, initialDraft: draft });
-  }
-
-  function applyPromptModal(draft: string) {
-    if (!promptModal) {
-      return;
-    }
-    updateCapability(promptModal.stage, {
-      promptSourceType: "custom",
-      prompt: `${ownPromptDir(workflow)}/${promptModal.stage}.md`,
-      promptContent: draft,
-    });
+  function savePromptContent(stage: string, promptContent: string) {
+    setWorkflow((prev) => ({
+      ...prev,
+      capabilities: {
+        ...prev.capabilities,
+        [stage]: {
+          ...(prev.capabilities[stage] ?? defaultCapability(stage)),
+          promptSourceType: "custom",
+          prompt: `${ownPromptDir(prev)}/${stage}.md`,
+          promptContent,
+        },
+      },
+    }));
     setPromptModal(null);
   }
 
@@ -397,18 +401,20 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     }));
   }
 
-  async function saveWorkflow() {
+  async function saveWorkflow(slugOverride?: string) {
     setSaving(true);
     setError("");
     setNotice("");
     try {
+      const slug = (slugOverride ?? effectiveWorkflowSlug).trim();
+      const storage = workflowStorage(workflow);
       const response = await fetch("/api/workflows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: workflowSlug(workflow),
+          id: slug,
           path: !isNew && workflow.isEditable ? workflow.path : undefined,
-          storage: workflowStorage(workflow),
+          storage,
           description: workflow.description,
           steps: workflow.steps,
           capabilities: workflow.capabilities,
@@ -419,6 +425,8 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
         throw new Error(payload.error ?? "保存 workflow 失败");
       }
       setWorkflow(payload.workflow);
+      setNameDraft(workflowSlug(payload.workflow));
+      setNameEditing(false);
       setIsNew(false);
       setNotice(`已保存 ${payload.workflow.path}`);
       await refreshList(payload.workflow.path);
@@ -429,6 +437,16 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     }
   }
 
+  function beginNameEdit() {
+    setNameDraft(workflowSlug(workflow));
+    setNameEditing(true);
+  }
+
+  function cancelNameEdit() {
+    setNameDraft(workflowSlug(workflow));
+    setNameEditing(false);
+  }
+
   async function deleteWorkflow(path: string) {
     if (!window.confirm(`确认删除 ${path} 及其自定义 prompt 文件夹？`)) {
       return;
@@ -436,12 +454,12 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/workflows/${path}`, { method: "DELETE" });
+      const response = await fetch(`/api/workflows/${workflowApiPath(path)}`, { method: "DELETE" });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
         throw new Error(payload.error ?? "删除 workflow 失败");
       }
-      startNew();
+      clearSelection();
       await refreshList();
       setNotice(`已删除 ${path}`);
     } catch (err) {
@@ -495,9 +513,57 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
       </aside>
 
       <section className="workflow-editor-panel">
-        <div className="workflow-editor-head">
+        {!isNew && !selectedPath ? (
+          <>
+            {notice ? <div className="notice success">{notice}</div> : null}
+            {error ? <div className="notice danger">{error}</div> : null}
+            <div className="empty-inline workflow-empty-detail">
+              请选择左侧工作流，或点击“新建”创建一个工作流。
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="workflow-editor-head">
           <div>
-            <div className="section-title">{isNew ? "新建工作流" : workflow.id || "工作流详情"}</div>
+            <div className="workflow-title-edit">
+              {nameEditing ? (
+                <>
+                  <input
+                    className="workflow-title-input"
+                    value={nameDraft}
+                    placeholder="my_weekly_news"
+                    disabled={!workflow.isEditable && !isNew}
+                    autoFocus
+                    onChange={(event) => setNameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        void saveWorkflow(nameDraft);
+                      }
+                      if (event.key === "Escape") {
+                        cancelNameEdit();
+                      }
+                    }}
+                  />
+                  <button type="button" className="icon-btn" onClick={() => saveWorkflow(nameDraft)} disabled={!nameDraft.trim() || saving}>
+                    ✓
+                  </button>
+                  {!isNew ? (
+                    <button type="button" className="icon-btn" onClick={cancelNameEdit}>
+                      ×
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className="section-title">{workflow.id || "工作流详情"}</div>
+                  {workflow.isEditable || isNew ? (
+                    <button type="button" className="icon-btn" onClick={beginNameEdit} aria-label="编辑工作流文件名" title="编辑工作流文件名">
+                      ✎
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
             <div className="section-subtitle">
               {workflow.isTopic
                 ? "主题工作流会保存到 topics 目录，专属 Prompt 会保存到 prompts/topics/<id>/。"
@@ -512,12 +578,12 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
                 复制
               </button>
             )}
-            {!isNew && workflow.isCustom && (
-              <button type="button" className="btn warn compact-btn" onClick={() => deleteWorkflow(workflow.path)} disabled={loading}>
+            {!isNew && workflow.isEditable && (
+              <button type="button" className="danger-link-btn" onClick={() => deleteWorkflow(workflow.path)} disabled={loading}>
                 删除
               </button>
             )}
-            <button type="button" className="btn primary-btn compact-btn" onClick={saveWorkflow} disabled={!canSave || saving || (!workflow.isEditable && !isNew)}>
+            <button type="button" className="btn primary-btn compact-btn" onClick={() => saveWorkflow()} disabled={!canSave || saving || (!workflow.isEditable && !isNew)}>
               {saving ? "保存中" : "保存"}
             </button>
           </div>
@@ -536,15 +602,6 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
               </select>
             </label>
           )}
-          <label className="form-group">
-            <span className="form-label">{workflow.isTopic ? "topic_slug" : "自定义 ID"}</span>
-            <input
-              value={workflowSlug(workflow)}
-              placeholder="my_weekly_news"
-              disabled={!isNew}
-              onChange={(event) => updateWorkflow({ id: event.target.value })}
-            />
-          </label>
           <label className="form-group">
             <span className="form-label">描述</span>
             <input
@@ -667,51 +724,9 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
                 {PROMPT_STAGES.has(activeStage) && (
                   <div className="prompt-editor">
                     <div className="section-title small">Prompt 设置</div>
-                    <div className="prompt-source-grid">
-                      {(["default", "existing", "custom"] as PromptSourceType[]).map((sourceType) => (
-                        <label key={sourceType} className="radio-row">
-                          <input
-                            type="radio"
-                            checked={(currentCapability.promptSourceType ?? "default") === sourceType}
-                            disabled={!workflow.isEditable && !isNew}
-                            onChange={() => changePromptSource(sourceType)}
-                          />
-                          <span>
-                            {sourceType === "default" ? "继承全局默认" : sourceType === "existing" ? "复用已有模板" : "完全自定义"}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-
-                    {currentPromptSource === "existing" && (
-                      <select
-                        value={currentCapability.prompt ?? ""}
-                        disabled={!workflow.isEditable && !isNew}
-                        onChange={(event) => {
-                          const prompt = event.target.value;
-                          updateCapability(activeStage, {
-                            prompt,
-                            promptContent: findPromptTemplate(activeStage, prompt)?.content ?? "",
-                          });
-                        }}
-                      >
-                        {(availablePrompts[activeStage] ?? []).map((prompt) => (
-                          <option key={prompt.path} value={prompt.path}>
-                            {prompt.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-
                     <div className="prompt-current-card">
                       <div className="prompt-current-main">
-                        <div className="prompt-current-label">
-                          {currentPromptSource === "custom"
-                            ? "自定义 Markdown"
-                            : currentPromptSource === "existing"
-                              ? "复用模板"
-                              : "全局默认"}
-                        </div>
+                        <div className="prompt-current-label">当前 Prompt</div>
                         <code>{currentCapability.prompt ?? defaultPromptPath(activeStage)}</code>
                         <div className="prompt-current-preview">
                           {promptContentFor(activeStage, currentCapability).trim() || "当前没有可预览的 Markdown 内容。"}
@@ -721,9 +736,9 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
                         type="button"
                         className="btn secondary-btn compact-btn"
                         disabled={!workflow.isEditable && !isNew}
-                        onClick={() => openPromptModal(activeStage)}
+                        onClick={() => setPromptModal({ stage: activeStage, draft: promptContentFor(activeStage, currentCapability) })}
                       >
-                        {currentPromptSource === "custom" ? "编辑 Markdown" : "转为自定义并编辑"}
+                        编辑
                       </button>
                     </div>
                   </div>
@@ -734,27 +749,21 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
             )}
           </div>
         </div>
+          </>
+        )}
       </section>
 
-      {promptModal && (
+      {promptModal ? (
         <PromptMarkdownModal
           stage={promptModal.stage}
           promptPath={`${ownPromptDir(workflow)}/${promptModal.stage}.md`}
-          initialDraft={promptModal.initialDraft}
+          initialDraft={promptModal.draft}
           onClose={() => setPromptModal(null)}
-          onApply={applyPromptModal}
+          onSave={(draft) => savePromptContent(promptModal.stage, draft)}
         />
-      )}
+      ) : null}
     </div>
   );
-}
-
-interface PromptMarkdownModalProps {
-  stage: string;
-  promptPath: string;
-  initialDraft: string;
-  onClose: () => void;
-  onApply: (draft: string) => void;
 }
 
 function PromptMarkdownModal({
@@ -762,8 +771,14 @@ function PromptMarkdownModal({
   promptPath,
   initialDraft,
   onClose,
-  onApply,
-}: PromptMarkdownModalProps) {
+  onSave,
+}: {
+  stage: string;
+  promptPath: string;
+  initialDraft: string;
+  onClose: () => void;
+  onSave: (draft: string) => void;
+}) {
   const [draft, setDraft] = useState(initialDraft);
 
   return (
@@ -772,7 +787,7 @@ function PromptMarkdownModal({
         <div className="prompt-modal-head">
           <div>
             <div id="prompt-modal-title" className="section-title">
-              编辑 Prompt Markdown
+              编辑 Prompt
             </div>
             <div className="section-subtitle">
               {stage} · <code>{promptPath}</code>
@@ -793,8 +808,8 @@ function PromptMarkdownModal({
           <button type="button" className="btn secondary-btn" onClick={onClose}>
             取消
           </button>
-          <button type="button" className="btn primary-btn" onClick={() => onApply(draft)}>
-            应用到阶段
+          <button type="button" className="btn primary-btn" onClick={() => onSave(draft)}>
+            保存到专属 Prompt
           </button>
         </div>
       </div>

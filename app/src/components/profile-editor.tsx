@@ -3,11 +3,21 @@
 import Link from "next/link";
 import { type PointerEvent, useMemo, useRef, useState } from "react";
 
+import { TtsSettingsEditor } from "@/components/tts-settings-panel";
 import { PROFILE_DEFAULTS, type ColorTriple, type FieldSpec } from "@/lib/profile-defaults";
+import {
+  countRuntimeOverrideLeaves,
+  effectiveTtsSettings,
+  saveTtsHistoryItem,
+  type ProjectRuntimeOverrides,
+  type TtsRuntimeDefaults,
+} from "@/lib/tts-settings";
 
 interface Props {
   initial: Record<string, unknown>;
   base: Record<string, unknown>;
+  ttsInitial?: ProjectRuntimeOverrides;
+  ttsDefaults?: TtsRuntimeDefaults;
 }
 
 export function getNested(state: Record<string, unknown>, key: string): unknown {
@@ -103,43 +113,33 @@ export function countOverrideLeaves(value: unknown): number {
 
 const ALL_FIELD_SPECS = PROFILE_DEFAULTS.flatMap((group) => group.fields);
 const FIELD_BY_KEY = new Map(ALL_FIELD_SPECS.map((field) => [field.key, field]));
-const VISUAL_PARAM_KEYS = new Set([
-  "compose.subtitle_center_x_ratio",
-  "compose.subtitle_center_ratio",
-  "compose.subtitle_overlay_half_height",
-  "compose.bottom_overlay_alpha",
-  "compose.content_title_y",
-  "compose.top_bar_height",
-  "compose.top_gradient_height",
-  "compose.top_bar_alpha",
-  "compose.progress_bar_enabled",
-  "compose.progress_bar_ratio",
-  "compose.progress_bar_width_ratio",
-  "compose.subtitle_font_size",
-  "compose.title_font_size",
-  "compose.max_chars_per_line",
-  "compose.cover_title_center_x_ratio",
-  "compose.cover_title_center_ratio",
-  "compose.cover_title_overlay_half_height",
-  "compose.cover_title_overlay_alpha",
-  "compose.cover_overlay_alpha",
-  "compose.cover_brand_y",
-  "compose.cover_title_font_size",
-  "compose.cover_brand_font_size",
-  "compose.cover_max_chars_per_line",
-]);
 
 function fields(keys: string[]): FieldSpec[] {
   return keys.map((key) => FIELD_BY_KEY.get(key)).filter(Boolean) as FieldSpec[];
 }
 
-const DEFAULT_PARAM_SECTIONS = [
+const COVER_PARAM_SECTIONS = [
   {
-    title: "生成与时长",
+    title: "封面开场",
     fields: fields([
       "intro.enabled",
       "intro.duration",
       "intro.cover_narration_enabled",
+    ]),
+  },
+  {
+    title: "封面颜色",
+    fields: fields([
+      "compose.cover_brand_color",
+      "compose.cover_title_color",
+    ]),
+  },
+];
+
+const CONTENT_PARAM_SECTIONS = [
+  {
+    title: "生成与时长",
+    fields: fields([
       "topics.count",
       "topics.target_duration_min",
       "topics.target_duration_max",
@@ -165,13 +165,6 @@ const DEFAULT_PARAM_SECTIONS = [
       "compose.stroke_color",
       "compose.progress_bg_color",
       "compose.progress_fg_color",
-    ]),
-  },
-  {
-    title: "封面",
-    fields: fields([
-      "compose.cover_brand_color",
-      "compose.cover_title_color",
     ]),
   },
 ];
@@ -247,28 +240,48 @@ function defaultValueForField(spec: FieldSpec, baseValue: unknown): unknown {
   return spec.default;
 }
 
-export function ProfileEditor({ initial, base }: Props) {
+type ConfigTab = "cover" | "content" | "tts";
+
+export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults }: Props) {
   const [state, setState] = useState<Record<string, unknown>>(initial);
+  const [ttsState, setTtsState] = useState<ProjectRuntimeOverrides>(ttsInitial ?? {});
+  const [activeTab, setActiveTab] = useState<ConfigTab>("cover");
   const effective = useMemo(() => deepMerge(base, state), [base, state]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const showTtsTab = Boolean(ttsDefaults);
 
   const save = async () => {
     setSaving(true);
     setMessage("");
     setError("");
     try {
-      const response = await fetch("/api/profile", {
+      const profileResponse = await fetch("/api/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(state),
       });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "保存失败");
+      const profilePayload = (await profileResponse.json()) as { ok?: boolean; error?: string };
+      if (!profileResponse.ok || !profilePayload.ok) {
+        throw new Error(profilePayload.error ?? "保存失败");
       }
-      setMessage("已写入 profile_overrides.json，新跑的流水线会生效。");
+
+      if (ttsDefaults) {
+        const runtimeResponse = await fetch("/api/runtime-overrides", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ttsState),
+        });
+        const runtimePayload = (await runtimeResponse.json()) as { ok?: boolean; error?: string };
+        if (!runtimeResponse.ok || !runtimePayload.ok) {
+          throw new Error(runtimePayload.error ?? "TTS 全局配置保存失败");
+        }
+        if (countRuntimeOverrideLeaves(ttsState) > 0) {
+          saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, ttsState));
+        }
+      }
+      setMessage("已写入全局配置，新跑的流水线会生效。");
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
     } finally {
@@ -280,73 +293,91 @@ export function ProfileEditor({ initial, base }: Props) {
     setState((prev) => clearNested(prev, spec.key));
   };
 
-  const useDefault = (spec: FieldSpec) => {
-    setState((prev) => setNested(prev, spec.key, defaultValueForField(spec, getNested(base, spec.key))));
-  };
-
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <VisualLayoutEditor
-        effective={effective}
-        onChange={(key, value) => setState((prev) => setNested(prev, key, value))}
-        onChangeMany={(updates) => setState((prev) => setManyNested(prev, updates))}
-      />
-
-      <div className="param-section-stack">
-        {DEFAULT_PARAM_SECTIONS.map((group) => (
-          <section key={group.title} className="panel param-group-panel">
-            <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
-            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              {group.fields.map((spec) => (
-                <FieldRow
-                  key={spec.key}
-                  spec={spec}
-                  value={getNested(state, spec.key)}
-                  effectiveValue={getNested(effective, spec.key)}
-                  baseValue={getNested(base, spec.key)}
-                  onChange={(value) => setState((prev) => setNested(prev, spec.key, value))}
-                  onClear={() => resetField(spec)}
-                  onUseDefault={() => useDefault(spec)}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+      <div className="config-category-tabs">
+        <button type="button" className={activeTab === "cover" ? "active" : ""} onClick={() => setActiveTab("cover")}>封面</button>
+        <button type="button" className={activeTab === "content" ? "active" : ""} onClick={() => setActiveTab("content")}>内容</button>
+        {showTtsTab ? (
+          <button type="button" className={activeTab === "tts" ? "active" : ""} onClick={() => setActiveTab("tts")}>TTS</button>
+        ) : null}
       </div>
 
-      <details className="panel all-params-details">
-        <summary>
-          <span>查看可视化参数明细</span>
-          <span className="badge">{VISUAL_PARAM_KEYS.size} 项</span>
-        </summary>
-        <div className="all-params-stack">
-          {VISUAL_PARAM_SECTIONS.map((group) => (
-            <section key={group.title} className="param-group-panel">
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
-              <div className="section-subtitle" style={{ marginTop: 4 }}>这些字段已经可以在上方可视化区域调整，默认折叠避免重复。</div>
-              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                {group.fields.map((spec) => (
-                  <FieldRow
-                    key={spec.key}
-                    spec={spec}
-                    value={getNested(state, spec.key)}
-                    effectiveValue={getNested(effective, spec.key)}
-                    baseValue={getNested(base, spec.key)}
-                    onChange={(value) => setState((prev) => setNested(prev, spec.key, value))}
-                    onClear={() => resetField(spec)}
-                    onUseDefault={() => useDefault(spec)}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      </details>
+      {activeTab === "cover" || activeTab === "content" ? (
+        <>
+          <VisualLayoutEditor
+            effective={effective}
+            forcedMode={activeTab}
+            onChange={(key, value) => setState((prev) => setNested(prev, key, value))}
+            onChangeMany={(updates) => setState((prev) => setManyNested(prev, updates))}
+          />
+
+          <div className="param-section-stack">
+            {(activeTab === "cover" ? COVER_PARAM_SECTIONS : CONTENT_PARAM_SECTIONS).map((group) => (
+              <section key={group.title} className="panel param-group-panel">
+                <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
+                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                  {group.fields.map((spec) => (
+                    <FieldRow
+                      key={spec.key}
+                      spec={spec}
+                      value={getNested(state, spec.key)}
+                      effectiveValue={getNested(effective, spec.key)}
+                      onChange={(value) => setState((prev) => setNested(prev, spec.key, value))}
+                      onClear={() => resetField(spec)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+
+          <details className="panel all-params-details">
+            <summary>
+              <span>查看{activeTab === "cover" ? "封面" : "内容"}可视化参数明细</span>
+              <span className="badge">{activeTab === "cover" ? VISUAL_PARAM_SECTIONS[1].fields.length : VISUAL_PARAM_SECTIONS[0].fields.length} 项</span>
+            </summary>
+            <div className="all-params-stack">
+              {[activeTab === "cover" ? VISUAL_PARAM_SECTIONS[1] : VISUAL_PARAM_SECTIONS[0]].map((group) => (
+                <section key={group.title} className="param-group-panel">
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
+                  <div className="section-subtitle" style={{ marginTop: 4 }}>这些字段已经可以在上方可视化区域调整，默认折叠避免重复。</div>
+                  <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                    {group.fields.map((spec) => (
+                      <FieldRow
+                        key={spec.key}
+                        spec={spec}
+                        value={getNested(state, spec.key)}
+                        effectiveValue={getNested(effective, spec.key)}
+                        onChange={(value) => setState((prev) => setNested(prev, spec.key, value))}
+                        onClear={() => resetField(spec)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </details>
+        </>
+      ) : null}
+
+      {activeTab === "tts" && ttsDefaults ? (
+        <section className="panel param-group-panel">
+          <TtsSettingsEditor
+            value={ttsState}
+            defaults={ttsDefaults}
+            onChange={setTtsState}
+            disabled={saving}
+            clearLabel="清除 TTS 修改"
+            defaultLabel="默认配置"
+          />
+        </section>
+      ) : null}
 
       <div className="panel" style={{ padding: 14 }}>
         <div className="row" style={{ alignItems: "center" }}>
           <button className="approve-btn" disabled={saving} onClick={save}>
-            {saving ? "保存中..." : "保存到 profile_overrides.json"}
+            {saving ? "保存中..." : "保存全局配置"}
           </button>
           {message ? <span className="badge approved">{message}</span> : null}
           {error ? <span className="badge rejected">{error}</span> : null}
@@ -364,10 +395,8 @@ interface FieldRowProps {
   spec: FieldSpec;
   value: unknown;
   effectiveValue: unknown;
-  baseValue: unknown;
   onChange: (value: unknown) => void;
   onClear: () => void;
-  onUseDefault: () => void;
 }
 
 type VisualMode = "content" | "cover";
@@ -401,10 +430,12 @@ interface VisualLayoutEditorProps {
   effective: Record<string, unknown>;
   onChange: (key: string, value: unknown) => void;
   onChangeMany: (updates: Record<string, unknown>) => void;
+  forcedMode?: VisualMode;
 }
 
-export function VisualLayoutEditor({ effective, onChange, onChangeMany }: VisualLayoutEditorProps) {
-  const [mode, setMode] = useState<VisualMode>("content");
+export function VisualLayoutEditor({ effective, onChange, onChangeMany, forcedMode }: VisualLayoutEditorProps) {
+  const [localMode, setLocalMode] = useState<VisualMode>("content");
+  const mode = forcedMode ?? localMode;
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
 
@@ -484,10 +515,12 @@ export function VisualLayoutEditor({ effective, onChange, onChangeMany }: Visual
           <div className="section-title">画面可视化配置</div>
           <div className="section-subtitle">拖动预览中的锚点或使用滑块；保存后，新跑的流水线会按这些参数渲染。</div>
         </div>
-        <div className="segmented-control">
-          <button type="button" className={mode === "content" ? "active" : ""} onClick={() => setMode("content")}>内容页</button>
-          <button type="button" className={mode === "cover" ? "active" : ""} onClick={() => setMode("cover")}>封面</button>
-        </div>
+        {forcedMode ? null : (
+          <div className="segmented-control">
+            <button type="button" className={mode === "content" ? "active" : ""} onClick={() => setLocalMode("content")}>内容页</button>
+            <button type="button" className={mode === "cover" ? "active" : ""} onClick={() => setLocalMode("cover")}>封面</button>
+          </div>
+        )}
       </div>
 
       <div className="visual-config-grid">
@@ -829,6 +862,10 @@ export function ProjectProfileConfigModal({
   base,
   value,
   onChange,
+  ttsValue,
+  ttsDefaults,
+  onTtsChange,
+  ttsDisabled = false,
   onClose,
 }: {
   title: string;
@@ -836,9 +873,18 @@ export function ProjectProfileConfigModal({
   base: Record<string, unknown>;
   value: Record<string, unknown>;
   onChange: (value: Record<string, unknown>) => void;
+  ttsValue?: ProjectRuntimeOverrides;
+  ttsDefaults?: TtsRuntimeDefaults;
+  onTtsChange?: (value: ProjectRuntimeOverrides) => void;
+  ttsDisabled?: boolean;
   onClose: () => void;
 }) {
+  const [activeTab, setActiveTab] = useState<ConfigTab>("cover");
   const effective = useMemo(() => deepMerge(base, value), [base, value]);
+  const showTtsTab = Boolean(ttsDefaults && ttsValue && onTtsChange);
+  const profileOverrideCount = countOverrideLeaves(value);
+  const runtimeOverrideCount = countRuntimeOverrideLeaves(ttsValue);
+  const totalOverrideCount = profileOverrideCount + runtimeOverrideCount;
   const updateOne = (key: string, nextValue: unknown) => {
     if (nextValue === undefined || nextValue === "") {
       onChange(clearNested(value, key));
@@ -867,6 +913,11 @@ export function ProjectProfileConfigModal({
     }));
   };
 
+  const clearAllOverrides = () => {
+    onChange({});
+    onTtsChange?.({});
+  };
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="project-config-modal" role="dialog" aria-modal="true" aria-labelledby="project-config-title" onClick={(event) => event.stopPropagation()}>
@@ -879,67 +930,99 @@ export function ProjectProfileConfigModal({
         </div>
 
         <div className="project-config-modal-body">
-          <div className="project-config-toolbar">
-            <span className="badge">{countOverrideLeaves(value)} 项项目覆盖</span>
-            <button type="button" className="btn secondary-btn compact-btn" onClick={() => onChange({})} disabled={countOverrideLeaves(value) === 0}>
-              清空项目覆盖
-            </button>
-            <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("inherit")}>继承尺寸</button>
-            <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("vertical")}>9:16</button>
-            <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("horizontal")}>16:9</button>
-            <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("square")}>1:1</button>
+          <div className="config-category-tabs">
+            <button type="button" className={activeTab === "cover" ? "active" : ""} onClick={() => setActiveTab("cover")}>封面</button>
+            <button type="button" className={activeTab === "content" ? "active" : ""} onClick={() => setActiveTab("content")}>内容</button>
+            {showTtsTab ? (
+              <button type="button" className={activeTab === "tts" ? "active" : ""} onClick={() => setActiveTab("tts")}>TTS</button>
+            ) : null}
           </div>
 
-          <VisualLayoutEditor
-            effective={effective}
-            onChange={updateOne}
-            onChangeMany={updateMany}
-          />
+          <div className="project-config-toolbar">
+            <span className="badge">{totalOverrideCount} 项项目修改</span>
+            <button type="button" className="btn secondary-btn compact-btn" onClick={clearAllOverrides} disabled={totalOverrideCount === 0}>
+              清空全部项目修改
+            </button>
+            {activeTab === "content" ? (
+              <>
+                <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("inherit")}>清除尺寸修改</button>
+                <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("vertical")}>9:16</button>
+                <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("horizontal")}>16:9</button>
+                <button type="button" className="btn secondary-btn compact-btn" onClick={() => applyPreset("square")}>1:1</button>
+              </>
+            ) : null}
+          </div>
 
-          <div className="param-section-stack">
-            {DEFAULT_PARAM_SECTIONS.map((group) => (
-              <section key={group.title} className="panel param-group-panel">
-                <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
-                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                  {group.fields.map((spec) => (
-                    <OverrideFieldRow
-                      key={spec.key}
+          {activeTab === "cover" || activeTab === "content" ? (
+            <>
+              <VisualLayoutEditor
+                effective={effective}
+                forcedMode={activeTab}
+                onChange={updateOne}
+                onChangeMany={updateMany}
+              />
+
+              <div className="param-section-stack">
+                {(activeTab === "cover" ? COVER_PARAM_SECTIONS : CONTENT_PARAM_SECTIONS).map((group) => (
+                  <section key={group.title} className="panel param-group-panel">
+                    <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
+                    <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                      {group.fields.map((spec) => (
+                        <OverrideFieldRow
+                          key={spec.key}
                       spec={spec}
                       value={getNested(value, spec.key)}
                       inheritedValue={getNested(base, spec.key)}
+                      effectiveValue={getNested(effective, spec.key)}
                       onChange={(fieldValue) => updateOne(spec.key, fieldValue)}
                     />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+
+              <details className="panel all-params-details">
+                <summary>
+                  <span>查看{activeTab === "cover" ? "封面" : "内容"}可视化参数明细</span>
+                  <span className="badge">{activeTab === "cover" ? VISUAL_PARAM_SECTIONS[1].fields.length : VISUAL_PARAM_SECTIONS[0].fields.length} 项</span>
+                </summary>
+                <div className="all-params-stack">
+                  {[activeTab === "cover" ? VISUAL_PARAM_SECTIONS[1] : VISUAL_PARAM_SECTIONS[0]].map((group) => (
+                    <section key={group.title} className="param-group-panel">
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
+                      <div className="section-subtitle" style={{ marginTop: 4 }}>这些字段已经可以在上方可视化区域调整，默认折叠避免重复。</div>
+                      <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                        {group.fields.map((spec) => (
+                          <OverrideFieldRow
+                            key={spec.key}
+                            spec={spec}
+                            value={getNested(value, spec.key)}
+                            inheritedValue={getNested(base, spec.key)}
+                            effectiveValue={getNested(effective, spec.key)}
+                            onChange={(fieldValue) => updateOne(spec.key, fieldValue)}
+                          />
+                        ))}
+                      </div>
+                    </section>
                   ))}
                 </div>
-              </section>
-            ))}
-          </div>
+              </details>
+            </>
+          ) : null}
 
-          <details className="panel all-params-details">
-            <summary>
-              <span>查看可视化参数明细</span>
-              <span className="badge">{VISUAL_PARAM_KEYS.size} 项</span>
-            </summary>
-            <div className="all-params-stack">
-              {VISUAL_PARAM_SECTIONS.map((group) => (
-                <section key={group.title} className="param-group-panel">
-                  <div style={{ fontWeight: 700, fontSize: 16 }}>{group.title}</div>
-                  <div className="section-subtitle" style={{ marginTop: 4 }}>这些字段已经可以在上方可视化区域调整，默认折叠避免重复。</div>
-                  <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                    {group.fields.map((spec) => (
-                      <OverrideFieldRow
-                        key={spec.key}
-                        spec={spec}
-                        value={getNested(value, spec.key)}
-                        inheritedValue={getNested(base, spec.key)}
-                        onChange={(fieldValue) => updateOne(spec.key, fieldValue)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </details>
+          {activeTab === "tts" && showTtsTab && ttsDefaults && ttsValue && onTtsChange ? (
+            <section className="panel param-group-panel">
+              <TtsSettingsEditor
+                value={ttsValue}
+                defaults={ttsDefaults}
+                onChange={onTtsChange}
+                disabled={ttsDisabled}
+                clearLabel="清除 TTS 修改"
+                defaultLabel="当前默认"
+              />
+            </section>
+          ) : null}
         </div>
       </div>
     </div>
@@ -950,34 +1033,36 @@ function OverrideFieldRow({
   spec,
   value,
   inheritedValue,
+  effectiveValue,
   onChange,
 }: {
   spec: FieldSpec;
   value: unknown;
   inheritedValue: unknown;
+  effectiveValue: unknown;
   onChange: (value: unknown) => void;
 }) {
   const isOverridden = value !== undefined;
-  const defaultHint = `继承: ${formatValue(inheritedValue, spec)}`;
+  const currentHint = `当前: ${formatValue(effectiveValue, spec)}`;
 
   if (spec.kind === "bool") {
+    const checked = typeof effectiveValue === "boolean" ? effectiveValue : Boolean(defaultValueForField(spec, inheritedValue));
     return (
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "center" }}>
         <div>
           <label style={{ fontSize: 13, fontWeight: 500 }}>{spec.label}</label>
           <div style={{ fontSize: 11, color: "var(--muted)" }}>
-            <code>{spec.key}</code> · {defaultHint}{spec.hint ? ` · ${spec.hint}` : ""}
+            <code>{spec.key}</code> · {currentHint}{spec.hint ? ` · ${spec.hint}` : ""}
           </div>
         </div>
         <select
-          value={value === undefined ? "inherit" : value ? "true" : "false"}
+          value={checked ? "true" : "false"}
           onChange={(event) => {
             const raw = event.target.value;
-            onChange(raw === "inherit" ? undefined : raw === "true");
+            onChange(raw === "true");
           }}
-          style={{ maxWidth: 180 }}
+          style={{ width: 180 }}
         >
-          <option value="inherit">继承</option>
           <option value="true">是</option>
           <option value="false">否</option>
         </select>
@@ -1005,7 +1090,7 @@ function OverrideFieldRow({
           <div>
             <label style={{ fontSize: 13, fontWeight: 500 }}>{spec.label}</label>
             <div style={{ fontSize: 11, color: "var(--muted)" }}>
-              <code>{spec.key}</code> · {defaultHint}
+              <code>{spec.key}</code> · {currentHint}
             </div>
           </div>
           {isOverridden ? <button type="button" className="badge warning" onClick={() => onChange(undefined)} style={{ padding: "6px 12px" }}>清除</button> : null}
@@ -1018,35 +1103,33 @@ function OverrideFieldRow({
                 type="number"
                 min={0}
                 max={255}
-                value={isOverridden ? arr[idx] : ""}
-                placeholder={String(arr[idx])}
+                value={arr[idx]}
                 onChange={(event) => handleColor(idx, event.target.value)}
                 style={{ maxWidth: 90 }}
               />
             </div>
           ))}
           <span className="badge" style={{ background: `rgb(${arr[0]}, ${arr[1]}, ${arr[2]})`, color: arr[0] + arr[1] + arr[2] > 384 ? "#000" : "#fff", border: "1px solid var(--line)" }}>
-            {arr.join(",")}{isOverridden ? " 已覆盖" : ""}
+            {arr.join(",")}{isOverridden ? " 已修改" : ""}
           </span>
         </div>
       </div>
     );
   }
 
-  const fieldValue = value !== undefined ? value : "";
+  const fieldValue = value !== undefined ? value : effectiveValue;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "center" }}>
       <div>
         <label style={{ fontSize: 13, fontWeight: 500 }}>{spec.label}</label>
         <div style={{ fontSize: 11, color: "var(--muted)" }}>
-          <code>{spec.key}</code> · {defaultHint}{spec.hint ? ` · ${spec.hint}` : ""}
+          <code>{spec.key}</code> · {currentHint}{spec.hint ? ` · ${spec.hint}` : ""}
         </div>
       </div>
       <input
         type={spec.kind === "string" ? "text" : "number"}
         step={spec.kind === "float" ? "0.01" : "1"}
         value={typeof fieldValue === "string" || typeof fieldValue === "number" ? fieldValue : ""}
-        placeholder={formatValue(inheritedValue, spec)}
         onChange={(event) => {
           if (event.target.value === "") {
             onChange(undefined);
@@ -1059,16 +1142,16 @@ function OverrideFieldRow({
           const parsed = Number(event.target.value);
           onChange(Number.isFinite(parsed) ? parsed : 0);
         }}
-        style={{ maxWidth: 180 }}
+        style={{ width: 180 }}
       />
       {isOverridden ? <button type="button" className="badge warning" onClick={() => onChange(undefined)} style={{ padding: "6px 12px", height: 38 }}>清除</button> : <span style={{ width: 44 }} />}
     </div>
   );
 }
 
-function FieldRow({ spec, value, effectiveValue, baseValue, onChange, onClear, onUseDefault }: FieldRowProps) {
+function FieldRow({ spec, value, effectiveValue, onChange, onClear }: FieldRowProps) {
   const isOverridden = value !== undefined;
-  const defaultHint = `TOML: ${formatValue(baseValue, spec)}`;
+  const currentHint = `当前: ${formatValue(effectiveValue, spec)}`;
 
   if (spec.kind === "bool") {
     const checked = typeof effectiveValue === "boolean" ? effectiveValue : Boolean(spec.default);
@@ -1077,7 +1160,7 @@ function FieldRow({ spec, value, effectiveValue, baseValue, onChange, onClear, o
         <div>
           <label style={{ fontSize: 13, fontWeight: 500 }}>{spec.label}</label>
           <div style={{ fontSize: 11, color: "var(--muted)" }}>
-            <code>{spec.key}</code> · {defaultHint}{spec.hint ? ` · ${spec.hint}` : ""}
+            <code>{spec.key}</code> · {currentHint}{spec.hint ? ` · ${spec.hint}` : ""}
           </div>
         </div>
         <input
@@ -1086,7 +1169,7 @@ function FieldRow({ spec, value, effectiveValue, baseValue, onChange, onClear, o
           onChange={(event) => onChange(event.target.checked)}
           style={{ width: "auto" }}
         />
-        {isOverridden ? <button className="tab " onClick={onClear}>清除覆盖</button> : <button className="tab " onClick={onUseDefault}>写入当前值</button>}
+        {isOverridden ? <button className="tab " onClick={onClear}>清除修改</button> : <span style={{ width: 72 }} />}
       </div>
     );
   }
@@ -1109,7 +1192,7 @@ function FieldRow({ spec, value, effectiveValue, baseValue, onChange, onClear, o
         <div>
           <label style={{ fontSize: 13, fontWeight: 500 }}>{spec.label}</label>
           <div style={{ fontSize: 11, color: "var(--muted)" }}>
-            <code>{spec.key}</code> · {defaultHint}
+            <code>{spec.key}</code> · {currentHint}
           </div>
         </div>
         <div className="row" style={{ alignItems: "center" }}>
@@ -1129,7 +1212,7 @@ function FieldRow({ spec, value, effectiveValue, baseValue, onChange, onClear, o
           <span className="badge" style={{ background: `rgb(${arr[0]}, ${arr[1]}, ${arr[2]})`, color: arr[0] + arr[1] + arr[2] > 384 ? "#000" : "#fff", border: "1px solid var(--line)" }}>
             {arr.join(",")}
           </span>
-          {isOverridden ? <button className="tab " onClick={onClear}>清除</button> : null}
+          {isOverridden ? <button className="tab " onClick={onClear}>清除修改</button> : null}
         </div>
       </div>
     );
@@ -1143,14 +1226,13 @@ function FieldRow({ spec, value, effectiveValue, baseValue, onChange, onClear, o
       <div>
         <label style={{ fontSize: 13, fontWeight: 500 }}>{spec.label}</label>
         <div style={{ fontSize: 11, color: "var(--muted)" }}>
-          <code>{spec.key}</code> · {defaultHint}{spec.hint ? ` · ${spec.hint}` : ""}
+          <code>{spec.key}</code> · {currentHint}{spec.hint ? ` · ${spec.hint}` : ""}
         </div>
       </div>
       <input
         type={spec.kind === "string" ? "text" : "number"}
         step={spec.kind === "float" ? "0.01" : "1"}
         value={spec.kind === "string" ? strValue : numValue}
-        placeholder={formatDefault(spec)}
         onChange={(event) => {
           if (spec.kind === "string") {
             onChange(event.target.value);
@@ -1159,9 +1241,9 @@ function FieldRow({ spec, value, effectiveValue, baseValue, onChange, onClear, o
           const parsed = Number(event.target.value);
           onChange(Number.isFinite(parsed) ? parsed : 0);
         }}
-        style={{ maxWidth: 180 }}
+        style={{ width: 180 }}
       />
-      {isOverridden ? <button className="tab " onClick={onClear}>清除</button> : <button className="tab " onClick={onUseDefault}>默认</button>}
+      {isOverridden ? <button className="tab " onClick={onClear}>清除修改</button> : <span style={{ width: 72 }} />}
     </div>
   );
 }

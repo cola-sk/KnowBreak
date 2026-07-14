@@ -122,6 +122,26 @@ def _project_runtime_tts_overrides() -> dict:
     return tts if isinstance(tts, dict) else {}
 
 
+def _global_runtime_tts_overrides(project_root: Path, profile_name: str) -> dict:
+    overrides_path = project_root / "profiles" / profile_name / "runtime_overrides.json"
+    if not overrides_path.is_file():
+        return {}
+    try:
+        parsed = json.loads(overrides_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    tts = parsed.get("tts")
+    return tts if isinstance(tts, dict) else {}
+
+
+def _merged_runtime_tts_overrides(project_root: Path, profile_name: str) -> dict:
+    merged = dict(_global_runtime_tts_overrides(project_root, profile_name))
+    merged.update(_project_runtime_tts_overrides())
+    return merged
+
+
 def _runtime_tts_env(
     overrides: dict,
     field_names: tuple[str, ...],
@@ -178,11 +198,12 @@ def _tts_speed() -> float:
 def load_config() -> Config:
     # Web 服务进程可能持有启动时的旧 env；每次加载配置时让 .env 重新成为当前运行配置。
     load_dotenv(override=True)
-    runtime_tts = _project_runtime_tts_overrides()
     project_root = Path(__file__).resolve().parent.parent
+    profile_name = _env("KB_STYLE_PROFILE", "serious_science")
+    runtime_tts = _merged_runtime_tts_overrides(project_root, profile_name)
     profile = load_style_profile(
         project_root,
-        _env("KB_STYLE_PROFILE", "serious_science"),
+        profile_name,
         _optional_env("KB_STYLE_PROFILE_PATH"),
     )
     tts_provider = _runtime_tts_env(runtime_tts, ("provider",), "KB_TTS_PROVIDER", "edge").lower()
