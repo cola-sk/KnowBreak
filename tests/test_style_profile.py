@@ -11,7 +11,7 @@ def test_load_builtin_style_profile() -> None:
     profile = load_style_profile(project_root, "serious_science", None)
 
     assert profile.name == "serious_science"
-    assert profile.base_dir == project_root / "profiles" / "serious_science"
+    assert profile.base_dir == project_root / "profiles"
     assert "严肃科普" in profile.description
     assert "抖音严肃科普账号" in profile.prompts.script_system
     assert profile.generation.script_temperature is None
@@ -57,7 +57,7 @@ bg_color = [1, 2, 3]
 
 
 def test_load_style_profile_from_directory(tmp_path: Path) -> None:
-    profile_dir = tmp_path / "profiles" / "custom"
+    profile_dir = tmp_path / "profiles"
     prompts_dir = profile_dir / "prompts"
     prompts_dir.mkdir(parents=True)
     (prompts_dir / "script.md").write_text("directory prompt", encoding="utf-8")

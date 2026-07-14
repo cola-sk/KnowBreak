@@ -207,7 +207,9 @@ def _resolve_profile_path(project_root: Path, profile_name: str, profile_path: s
         if not path.is_absolute():
             path = (project_root / path).resolve()
     else:
-        path = project_root / "profiles" / profile_name / "profile.toml"
+        flat_path = project_root / "profiles" / "profile.toml"
+        legacy_path = project_root / "profiles" / profile_name / "profile.toml"
+        path = flat_path if flat_path.exists() else legacy_path
     if path.is_dir():
         path = path / "profile.toml"
     if not path.exists():

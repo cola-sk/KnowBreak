@@ -55,11 +55,11 @@ function parseSimpleToml(text: string): Record<string, unknown> {
   return result;
 }
 
-function profileDir(profileName = "serious_science"): string {
-  return path.join(resolveProjectRoot(), "profiles", profileName);
+function profileDir(_profileName = "default"): string {
+  return path.join(resolveProjectRoot(), "profiles");
 }
 
-export async function readProfileBase(profileName = "serious_science"): Promise<Record<string, unknown>> {
+export async function readProfileBase(profileName = "default"): Promise<Record<string, unknown>> {
   try {
     const text = await fs.readFile(path.join(profileDir(profileName), "profile.toml"), "utf-8");
     return parseSimpleToml(text);
@@ -68,7 +68,7 @@ export async function readProfileBase(profileName = "serious_science"): Promise<
   }
 }
 
-export async function readProfileOverrides(profileName = "serious_science"): Promise<Record<string, unknown>> {
+export async function readProfileOverrides(profileName = "default"): Promise<Record<string, unknown>> {
   const filePath = path.join(profileDir(profileName), "profile_overrides.json");
   try {
     if (!existsSync(filePath)) {

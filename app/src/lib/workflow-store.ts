@@ -12,7 +12,7 @@ import {
   type WorkflowSummary,
 } from "@/lib/review-store";
 
-const PROFILE_NAME = "serious_science";
+const PROFILE_NAME = "default";
 const WORKFLOW_FILE_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const PROMPT_STAGES = new Set(["extract", "topics", "rewrite", "topic_seed", "script", "storyboard", "assets", "images"]);
 
@@ -73,8 +73,8 @@ export interface WorkflowListPayload {
   availablePrompts: Record<string, PromptTemplate[]>;
 }
 
-function profileDir(profileName = PROFILE_NAME): string {
-  return path.join(resolveProjectRoot(), "profiles", profileName);
+function profileDir(_profileName = PROFILE_NAME): string {
+  return path.join(resolveProjectRoot(), "profiles");
 }
 
 function workflowsDir(profileName = PROFILE_NAME): string {

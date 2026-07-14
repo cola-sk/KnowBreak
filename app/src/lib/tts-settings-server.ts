@@ -15,11 +15,11 @@ import {
 
 const RUNTIME_OVERRIDES_FILE = "runtime_overrides.json";
 
-export function globalRuntimeOverridesPath(profileName = "serious_science"): string {
-  return path.join(resolveProjectRoot(), "profiles", profileName, RUNTIME_OVERRIDES_FILE);
+export function globalRuntimeOverridesPath(_profileName = "default"): string {
+  return path.join(resolveProjectRoot(), "profiles", RUNTIME_OVERRIDES_FILE);
 }
 
-export async function readGlobalRuntimeOverrides(profileName = "serious_science"): Promise<ProjectRuntimeOverrides> {
+export async function readGlobalRuntimeOverrides(profileName = "default"): Promise<ProjectRuntimeOverrides> {
   const filePath = globalRuntimeOverridesPath(profileName);
   try {
     if (!existsSync(filePath)) {
@@ -37,7 +37,7 @@ export async function readGlobalRuntimeOverrides(profileName = "serious_science"
 
 export async function writeGlobalRuntimeOverrides(
   value: ProjectRuntimeOverrides,
-  profileName = "serious_science",
+  profileName = "default",
 ): Promise<void> {
   const filePath = globalRuntimeOverridesPath(profileName);
   await fs.mkdir(path.dirname(filePath), { recursive: true });

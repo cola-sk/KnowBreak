@@ -123,7 +123,7 @@ def _project_runtime_tts_overrides() -> dict:
 
 
 def _global_runtime_tts_overrides(project_root: Path, profile_name: str) -> dict:
-    overrides_path = project_root / "profiles" / profile_name / "runtime_overrides.json"
+    overrides_path = project_root / "profiles" / "runtime_overrides.json"
     if not overrides_path.is_file():
         return {}
     try:
@@ -199,7 +199,7 @@ def load_config() -> Config:
     # Web 服务进程可能持有启动时的旧 env；每次加载配置时让 .env 重新成为当前运行配置。
     load_dotenv(override=True)
     project_root = Path(__file__).resolve().parent.parent
-    profile_name = _env("KB_STYLE_PROFILE", "serious_science")
+    profile_name = _env("KB_STYLE_PROFILE", "default")
     runtime_tts = _merged_runtime_tts_overrides(project_root, profile_name)
     profile = load_style_profile(
         project_root,

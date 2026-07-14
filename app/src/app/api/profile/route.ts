@@ -14,7 +14,6 @@ function overridesPath(): string {
   return path.join(
     resolveProjectRoot(),
     "profiles",
-    "serious_science",
     OVERRIDES_FILE,
   );
 }

@@ -448,9 +448,9 @@ export interface WorkflowSummary {
 }
 
 export async function listWorkflows(
-  profileName = "serious_science",
+  _profileName = "default",
 ): Promise<WorkflowSummary[]> {
-  const workflowsDir = path.join(resolveProjectRoot(), "profiles", profileName, "workflows");
+  const workflowsDir = path.join(resolveProjectRoot(), "profiles", "workflows");
   const files = await listTomlFiles(workflowsDir);
   const summaries: WorkflowSummary[] = [];
   for (const file of files) {
@@ -486,14 +486,14 @@ export async function listWorkflows(
 
 export async function resolveWorkflowCliName(
   workflowName: string,
-  profileName = "serious_science",
+  _profileName = "default",
 ): Promise<string> {
   const trimmed = workflowName.trim();
   if (!trimmed) {
     return trimmed;
   }
 
-  const workflowsDir = path.join(resolveProjectRoot(), "profiles", profileName, "workflows");
+  const workflowsDir = path.join(resolveProjectRoot(), "profiles", "workflows");
   const directPath = path.join(workflowsDir, `${trimmed}.toml`);
   if (existsSync(directPath)) {
     return trimmed;
@@ -629,7 +629,7 @@ export async function getVersionStartPreset(
     source,
     workflow: await resolveWorkflowCliName(
       workflowPlan?.workflow ?? "custom/serious_science_one",
-      workflowPlan?.profile ?? "serious_science",
+      workflowPlan?.profile ?? "default",
     ),
     title: await inferVersionTitle(versionDir),
     projectOverrides,
@@ -670,7 +670,7 @@ export async function getProductionReviewData(
     source: await inferRegenerationSource(versionDir),
     workflow: await resolveWorkflowCliName(
       workflowPlan?.workflow ?? "custom/serious_science_one",
-      workflowPlan?.profile ?? "serious_science",
+      workflowPlan?.profile ?? "default",
     ),
     workflowSteps: workflowPlan?.steps?.map((step) => step.capability).filter(Boolean) as string[] ?? [],
     videos: Array.isArray(compose.videos) ? compose.videos : [],
