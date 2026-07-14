@@ -104,6 +104,7 @@ function isSafeWorkflowSegment(segment: string): boolean {
   const value = segment.trim();
   return Boolean(value)
     && value === segment
+    && SAFE_SEGMENT_RE.test(value)
     && value !== "."
     && value !== ".."
     && !value.includes("/")

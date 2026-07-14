@@ -663,6 +663,23 @@ a.tab.active {
   font-weight: 700;
 }
 
+.workflow-list-group-toggle {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+}
+
+.workflow-list-group-arrow {
+  width: 1ch;
+  text-align: center;
+  color: var(--muted);
+}
+
 .workflow-list-group-desc,
 .workflow-list-empty {
   padding: 0 4px;

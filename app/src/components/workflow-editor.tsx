@@ -90,6 +90,7 @@ function createBlankWorkflow(): WorkflowDetail {
   }
   return {
     id: "",
+    displayName: "",
     description: "",
     steps: [...DEFAULT_REVIEW_FLOW],
     capabilities,
@@ -103,6 +104,7 @@ function createBlankWorkflow(): WorkflowDetail {
 function createEmptyWorkflow(): WorkflowDetail {
   return {
     id: "",
+    displayName: "",
     description: "",
     steps: [],
     capabilities: {},
@@ -118,7 +120,11 @@ function splitCsv(value: string): string[] {
 }
 
 function workflowSlug(workflow: WorkflowDetail): string {
-  return workflow.id.replace(/^(custom|topics)\//, "");
+  return workflow.path.replace(/^(custom|topics)\//, "");
+}
+
+function workflowDisplayName(workflow: WorkflowDetail): string {
+  return workflow.displayName || workflow.id || workflowSlug(workflow);
 }
 
 function workflowStorage(workflow: WorkflowDetail): WorkflowStorage {
@@ -147,6 +153,7 @@ function workflowApiPath(workflowPath: string): string {
 export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEditorProps) {
   const [workflows, setWorkflows] = useState(initialWorkflows);
   const [availablePrompts, setAvailablePrompts] = useState(initialPrompts);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [selectedPath, setSelectedPath] = useState<string>("");
   const [workflow, setWorkflow] = useState<WorkflowDetail>(createEmptyWorkflow());
   const [activeStage, setActiveStage] = useState("");
@@ -160,8 +167,8 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
   const [promptModal, setPromptModal] = useState<{ stage: string; draft: string } | null>(null);
 
   const currentCapability = workflow.capabilities[activeStage] ?? defaultCapability(activeStage);
-  const effectiveWorkflowSlug = (nameEditing ? nameDraft : workflowSlug(workflow)).trim();
-  const canSave = effectiveWorkflowSlug.length > 0 && workflow.steps.length > 0;
+  const effectiveDisplayName = (nameEditing ? nameDraft : workflowDisplayName(workflow)).trim();
+  const canSave = effectiveDisplayName.length > 0 && workflow.steps.length > 0;
 
   const availableStageOptions = useMemo(
     () => STAGE_OPTIONS.filter((stage) => !workflow.steps.includes(stage)),
@@ -228,7 +235,7 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
       }
       const detail = payload.workflow;
       setWorkflow(detail);
-      setNameDraft(workflowSlug(detail));
+      setNameDraft(workflowDisplayName(detail));
       setNameEditing(false);
       setSelectedPath(path);
       setActiveStage(detail.steps[0] ?? "");
@@ -267,6 +274,7 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     setWorkflow((prev) => ({
       ...prev,
       id: "",
+      displayName: "",
       path: "",
       isCustom: true,
       isTopic: false,
@@ -276,7 +284,7 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     setNameEditing(true);
     setSelectedPath("");
     setIsNew(true);
-    setNotice("已复制当前配置，请填写新的自定义 ID 后保存。");
+    setNotice("已复制当前配置，请填写新的显示名后保存，文件名会自动生成。");
   }
 
   function updateWorkflow(patch: Partial<WorkflowDetail>) {
@@ -401,18 +409,22 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
     }));
   }
 
-  async function saveWorkflow(slugOverride?: string) {
+  async function saveWorkflow() {
     setSaving(true);
     setError("");
     setNotice("");
     try {
-      const slug = (slugOverride ?? effectiveWorkflowSlug).trim();
+      const displayName = effectiveDisplayName.trim();
+      if (!displayName) {
+        throw new Error("请填写工作流显示名");
+      }
       const storage = workflowStorage(workflow);
       const response = await fetch("/api/workflows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: slug,
+          id: displayName,
+          displayName,
           path: !isNew && workflow.isEditable ? workflow.path : undefined,
           storage,
           description: workflow.description,
@@ -425,7 +437,7 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
         throw new Error(payload.error ?? "保存 workflow 失败");
       }
       setWorkflow(payload.workflow);
-      setNameDraft(workflowSlug(payload.workflow));
+      setNameDraft(workflowDisplayName(payload.workflow));
       setNameEditing(false);
       setIsNew(false);
       setNotice(`已保存 ${payload.workflow.path}`);
@@ -438,12 +450,12 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
   }
 
   function beginNameEdit() {
-    setNameDraft(workflowSlug(workflow));
+    setNameDraft(workflowDisplayName(workflow));
     setNameEditing(true);
   }
 
   function cancelNameEdit() {
-    setNameDraft(workflowSlug(workflow));
+    setNameDraft(workflowDisplayName(workflow));
     setNameEditing(false);
   }
 
@@ -486,11 +498,18 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
           {workflowGroups.map((group) => (
             <div className="workflow-list-group" key={group.key}>
               <div className="workflow-list-group-head">
-                <span>{group.title}</span>
+                <button
+                  type="button"
+                  className="workflow-list-group-toggle"
+                  onClick={() => setCollapsedGroups((prev) => ({ ...prev, [group.key]: !(prev[group.key] ?? false) }))}
+                >
+                  <span className="workflow-list-group-arrow">{(collapsedGroups[group.key] ?? false) ? "▸" : "▾"}</span>
+                  <span>{group.title}</span>
+                </button>
                 <span>{group.items.length}</span>
               </div>
               <div className="workflow-list-group-desc">{group.desc}</div>
-              {group.items.length === 0 ? (
+              {(collapsedGroups[group.key] ?? false) ? null : group.items.length === 0 ? (
                 <div className="workflow-list-empty">暂无</div>
               ) : (
                 group.items.map((item) => (
@@ -501,8 +520,10 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
                     onClick={() => loadWorkflow(item.path)}
                     disabled={loading}
                   >
-                    <span className="workflow-list-title">{item.id}</span>
-                    <span className="workflow-list-meta">{item.path}</span>
+                    <span className="workflow-list-title">{item.displayName || item.id}</span>
+                    {(item.displayName || item.id) !== item.path ? (
+                      <span className="workflow-list-meta">{item.path}</span>
+                    ) : null}
                     {item.description && <span className="workflow-list-desc">{item.description}</span>}
                   </button>
                 ))
@@ -531,20 +552,20 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
                   <input
                     className="workflow-title-input"
                     value={nameDraft}
-                    placeholder="my_weekly_news"
+                    placeholder="请输入工作流显示名"
                     disabled={!workflow.isEditable && !isNew}
                     autoFocus
                     onChange={(event) => setNameDraft(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
-                        void saveWorkflow(nameDraft);
+                        void saveWorkflow();
                       }
                       if (event.key === "Escape") {
                         cancelNameEdit();
                       }
                     }}
                   />
-                  <button type="button" className="icon-btn" onClick={() => saveWorkflow(nameDraft)} disabled={!nameDraft.trim() || saving}>
+                  <button type="button" className="icon-btn" onClick={() => saveWorkflow()} disabled={!nameDraft.trim() || saving}>
                     ✓
                   </button>
                   {!isNew ? (
@@ -555,9 +576,9 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
                 </>
               ) : (
                 <>
-                  <div className="section-title">{workflow.id || "工作流详情"}</div>
+                  <div className="section-title">{workflowDisplayName(workflow) || "工作流详情"}</div>
                   {workflow.isEditable || isNew ? (
-                    <button type="button" className="icon-btn" onClick={beginNameEdit} aria-label="编辑工作流文件名" title="编辑工作流文件名">
+                    <button type="button" className="icon-btn" onClick={beginNameEdit} aria-label="编辑工作流显示名" title="编辑工作流显示名">
                       ✎
                     </button>
                   ) : null}
@@ -566,10 +587,10 @@ export function WorkflowEditor({ initialWorkflows, initialPrompts }: WorkflowEdi
             </div>
             <div className="section-subtitle">
               {workflow.isTopic
-                ? "主题工作流会保存到 topics 目录，专属 Prompt 会保存到 prompts/topics/<id>/。"
+                ? "主题工作流保存到 topics 目录；文件名自动生成，只可编辑显示名。"
                 : workflow.isCustom
-                  ? "通用自定义工作流会保存到 custom 目录，专属 Prompt 会保存到 prompts/custom/<id>/。"
-                  : "内置工作流会直接保存回 workflows 根目录；专属 Prompt 会保存到 prompts/custom/<id>/，不会覆盖全局默认 Prompt。"}
+                  ? "通用自定义工作流保存到 custom 目录；文件名自动生成，只可编辑显示名。"
+                  : "内置工作流会直接保存回 workflows 根目录。"}
             </div>
           </div>
           <div className="workflow-actions">

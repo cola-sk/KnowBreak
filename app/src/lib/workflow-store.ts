@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -12,6 +13,7 @@ import {
 } from "@/lib/review-store";
 
 const PROFILE_NAME = "serious_science";
+const WORKFLOW_FILE_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const PROMPT_STAGES = new Set(["extract", "topics", "rewrite", "topic_seed", "script", "storyboard", "assets", "images"]);
 
 export type PromptSourceType = "default" | "existing" | "custom";
@@ -35,6 +37,7 @@ export interface EditableCapability {
 
 export interface WorkflowDetail {
   id: string;
+  displayName: string;
   description: string;
   steps: string[];
   capabilities: Record<string, EditableCapability>;
@@ -56,6 +59,8 @@ export interface WorkflowSaveCapability {
 
 export interface WorkflowSaveRequest {
   id?: string;
+  displayName?: string;
+  filePath?: string;
   path?: string;
   storage?: WorkflowStorage;
   description?: string;
@@ -235,7 +240,7 @@ function parseWorkflowToml(toml: string): Omit<WorkflowDetail, "path" | "isCusto
     }
   }
 
-  return { id, description, steps, capabilities };
+  return { id, displayName: id, description, steps, capabilities };
 }
 
 function promptSourceType(stage: string, promptPath: string | undefined, workflowPath: string): PromptSourceType | undefined {
@@ -362,6 +367,7 @@ export async function readWorkflowDetail(segments: string[], profileName = PROFI
 
   return {
     ...parsed,
+    displayName: parsed.id,
     path: cliName,
     isCustom,
     isTopic,
@@ -375,16 +381,32 @@ export async function saveCustomWorkflow(body: WorkflowSaveRequest, profileName 
 
 export async function saveEditableWorkflow(body: WorkflowSaveRequest, profileName = PROFILE_NAME): Promise<WorkflowDetail> {
   const original = body.path?.trim() ? normalizeExistingPath(body.path.trim()) : null;
-  const target = normalizeSaveTarget(body);
-  if (!isSafeWorkflowSegment(target.slug)) {
-    throw new Error("workflow 文件名不能为空，且不能包含 /、反斜杠或路径穿越符号");
+  const initialTarget = normalizeSaveTarget(body);
+  let target = initialTarget.slug
+    ? initialTarget
+    : {
+        storage: initialTarget.storage,
+        slug: await generateAvailableWorkflowSlug(initialTarget.storage, profileName),
+      };
+  if (!WORKFLOW_FILE_SLUG_RE.test(target.slug)) {
+    const implicitRenameFromLegacyPath = Boolean(original) && !(body.filePath ?? "").trim();
+    if (implicitRenameFromLegacyPath) {
+      const originalStorage = original ? original.storage : initialTarget.storage;
+      target = {
+        storage: originalStorage,
+        slug: await generateAvailableWorkflowSlug(originalStorage, profileName),
+      };
+    } else {
+      throw new Error("workflow 文件名只能使用英文、数字、下划线或中划线，且必须以英文或数字开头");
+    }
   }
   const steps = normalizeSteps(body.steps);
   const workflowPath = target.storage === "builtin" ? target.slug : `${target.storage}/${target.slug}`;
   const capabilities = normalizeCapabilities(workflowPath, steps, body.capabilities ?? {}, profileName);
 
   const workflow: WorkflowDetail = {
-    id: target.storage === "topics" || target.storage === "builtin" ? target.slug : `custom/${target.slug}`,
+    id: (body.displayName ?? body.id ?? target.slug).trim(),
+    displayName: (body.displayName ?? body.id ?? target.slug).trim(),
     description: (body.description ?? "").trim(),
     steps,
     capabilities,
@@ -396,14 +418,8 @@ export async function saveEditableWorkflow(body: WorkflowSaveRequest, profileNam
 
   await writeOwnedPrompts(workflow, profileName);
 
-  const filePath = target.storage === "builtin"
-    ? path.join(workflowsDir(profileName), `${target.slug}.toml`)
-    : path.join(workflowsDir(profileName), target.storage, `${target.slug}.toml`);
-  const originalFilePath = original
-    ? original.storage === "builtin"
-      ? path.join(workflowsDir(profileName), `${original.slug}.toml`)
-      : path.join(workflowsDir(profileName), original.storage, `${original.slug}.toml`)
-    : null;
+  const filePath = workflowTomlFilePath(target.storage, target.slug, profileName);
+  const originalFilePath = original ? workflowTomlFilePath(original.storage, original.slug, profileName) : null;
   const originalWorkflowPath = original
     ? original.storage === "builtin" ? original.slug : `${original.storage}/${original.slug}`
     : null;
@@ -423,7 +439,7 @@ export async function saveEditableWorkflow(body: WorkflowSaveRequest, profileNam
 }
 
 function normalizeSaveTarget(body: WorkflowSaveRequest): { storage: WorkflowStorage; slug: string } {
-  const rawId = (body.id ?? "").trim();
+  const rawId = (body.filePath ?? "").trim();
   const rawPath = body.path?.trim();
   if (rawPath && !rawId) {
     return normalizeExistingPath(rawPath);
@@ -439,6 +455,26 @@ function normalizeSaveTarget(body: WorkflowSaveRequest): { storage: WorkflowStor
     storage: body.storage === "topics" ? "topics" : body.storage === "builtin" ? "builtin" : "custom",
     slug: rawId,
   };
+}
+
+function workflowTomlFilePath(storage: WorkflowStorage, slug: string, profileName: string): string {
+  return storage === "builtin"
+    ? path.join(workflowsDir(profileName), `${slug}.toml`)
+    : path.join(workflowsDir(profileName), storage, `${slug}.toml`);
+}
+
+function randomWorkflowSlug(): string {
+  return `workflow_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+}
+
+async function generateAvailableWorkflowSlug(storage: WorkflowStorage, profileName: string): Promise<string> {
+  for (let i = 0; i < 12; i += 1) {
+    const slug = randomWorkflowSlug();
+    if (!existsSync(workflowTomlFilePath(storage, slug, profileName))) {
+      return slug;
+    }
+  }
+  throw new Error("生成 workflow 文件名失败，请重试");
 }
 
 function normalizeExistingPath(rawPath: string): { storage: WorkflowStorage; slug: string } {

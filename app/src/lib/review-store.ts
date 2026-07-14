@@ -437,6 +437,7 @@ export function readWorkflowSteps(toml: string): string[] {
 
 export interface WorkflowSummary {
   id: string;
+  displayName: string;
   description: string | null;
   path: string;
   steps: string[];
@@ -464,6 +465,7 @@ export async function listWorkflows(
     const steps = readWorkflowSteps(text);
     summaries.push({
       id,
+      displayName: id,
       description: readWorkflowDescription(text),
       path: workflowPath,
       steps,

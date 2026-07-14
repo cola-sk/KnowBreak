@@ -20,6 +20,7 @@ import {
 
 export const runtime = "nodejs";
 
+const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 const URL_RE = /^(https?:\/\/|youtu\.be\/|youtube\.com)/i;
 
 interface StartRequest {
@@ -38,14 +39,7 @@ function validateWorkflow(workflow: string): string {
 }
 
 function isSafeWorkflowSegment(segment: string): boolean {
-  const value = segment.trim();
-  return Boolean(value)
-    && value === segment
-    && value !== "."
-    && value !== ".."
-    && !value.includes("/")
-    && !value.includes("\\")
-    && !value.includes("\0");
+  return SAFE_SEGMENT_RE.test(segment) && segment !== "." && segment !== "..";
 }
 
 function resolveSource(input: string): { source: string; kind: "url" | "topic" } {
