@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 import type { ReviewStatus } from "@/lib/types";
 
-type Action = "approve_all" | "delete_version";
+type Action = "approve_all" | "delete_version" | "copy_start";
 
 const REVIEW_STAGES = ["script_review", "storyboard_review", "image_review"] as const;
 
@@ -56,7 +57,17 @@ function CheckIcon() {
   );
 }
 
+function CopyIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="8" y="8" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
 export function VersionActions({ videoId, version, doneStages, review, detailHref, onChanged }: Props) {
+  const router = useRouter();
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -64,6 +75,25 @@ export function VersionActions({ videoId, version, doneStages, review, detailHre
   const canApprove = !approved && hasReviewableArtifact(doneStages);
   const showEnterReview = !approved && hasReviewableArtifact(doneStages);
   const canDeleteVersion = version !== "legacy";
+
+  const copyStartPreset = async () => {
+    setBusy("copy_start");
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(`/api/projects/${videoId}/${version}/start-preset`, { cache: "no-store" });
+      const payload = (await response.json()) as { preset?: unknown; error?: string };
+      if (!response.ok || !payload.preset) {
+        throw new Error(payload.error ?? "复制任务参数失败");
+      }
+      window.sessionStorage.setItem("kb_start_preset", JSON.stringify(payload.preset));
+      router.push("/");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "复制任务参数失败");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const run = async (action: Action) => {
     if (action === "delete_version") {
@@ -99,6 +129,15 @@ export function VersionActions({ videoId, version, doneStages, review, detailHre
   return (
     <div onClick={(event) => event.stopPropagation()}>
       <div className="row">
+        <button
+          className="icon-btn reveal-action-btn"
+          disabled={busy !== null}
+          aria-label={`复制版本 ${version} 的参数发起新任务`}
+          onClick={copyStartPreset}
+          title={busy === "copy_start" ? "复制中..." : "复制参数发起新任务"}
+        >
+          <CopyIcon />
+        </button>
         {showEnterReview ? (
           <a
             className="icon-btn reveal-action-btn"

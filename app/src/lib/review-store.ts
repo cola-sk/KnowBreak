@@ -353,6 +353,19 @@ export interface ProductionReviewData {
   runtimeOverrides?: ProjectRuntimeOverrides;
 }
 
+export interface StartPresetData {
+  input: string;
+  source: string;
+  workflow: string;
+  title: string;
+  projectOverrides: Record<string, any>;
+  runtimeOverrides: ProjectRuntimeOverrides;
+  copiedFrom: {
+    videoId: string;
+    version: string;
+  };
+}
+
 async function readArtifact(videoId: string, version: string, stage: ArtifactStage): Promise<unknown | null> {
   return readJsonFile<unknown>(artifactPath(videoId, version, stage));
 }
@@ -587,6 +600,40 @@ async function inferRegenerationSource(versionDir: string): Promise<string> {
   }
 
   throw new Error("Unable to infer regeneration source. Please provide source explicitly.");
+}
+
+function sourceToStartInput(source: string): string {
+  return source.startsWith("manual:") ? source.slice("manual:".length) : source;
+}
+
+export async function getVersionStartPreset(
+  videoId: string,
+  version: string,
+): Promise<StartPresetData> {
+  const versionDir = getVersionDir(videoId, version);
+  if (!existsSync(versionDir)) {
+    throw new Error(`Version not found: ${version}`);
+  }
+  const workflowPlan = await readWorkflowPlan(versionDir);
+  const source = await inferRegenerationSource(versionDir);
+  const projectOverrides = (await readJsonFile<Record<string, any>>(
+    path.join(versionDir, "project_profile_overrides.json"),
+  )) || {};
+  const runtimeOverrides = (await readJsonFile<ProjectRuntimeOverrides>(
+    path.join(versionDir, PROJECT_RUNTIME_OVERRIDES_FILE),
+  )) || {};
+  return {
+    input: sourceToStartInput(source),
+    source,
+    workflow: await resolveWorkflowCliName(
+      workflowPlan?.workflow ?? "serious_science_one",
+      workflowPlan?.profile ?? "serious_science",
+    ),
+    title: await inferVersionTitle(versionDir),
+    projectOverrides,
+    runtimeOverrides,
+    copiedFrom: { videoId, version },
+  };
 }
 
 export async function getProductionReviewData(

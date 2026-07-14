@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 
 import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
 import { TtsSettingsPanel } from "@/components/tts-settings-panel";
@@ -43,6 +43,19 @@ interface JobStatus {
   error?: string;
 }
 
+interface StartPreset {
+  input?: string;
+  workflow?: string;
+  projectOverrides?: Record<string, unknown>;
+  runtimeOverrides?: ProjectRuntimeOverrides;
+  copiedFrom?: {
+    videoId?: string;
+    version?: string;
+  };
+}
+
+const START_PRESET_STORAGE_KEY = "kb_start_preset";
+
 export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults }: Props) {
   const router = useRouter();
   const [input, setInput] = useState("");
@@ -51,12 +64,42 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
+  const [prefillMessage, setPrefillMessage] = useState<string>("");
 
   // Project overrides state
   const [projectOverrides, setProjectOverrides] = useState<Record<string, unknown>>({});
   const [runtimeOverrides, setRuntimeOverrides] = useState<ProjectRuntimeOverrides>({});
   const [showConfig, setShowConfig] = useState(false);
   const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
+
+  useEffect(() => {
+    const raw = window.sessionStorage.getItem(START_PRESET_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+    window.sessionStorage.removeItem(START_PRESET_STORAGE_KEY);
+    try {
+      const preset = JSON.parse(raw) as StartPreset;
+      if (typeof preset.input === "string") {
+        setInput(preset.input);
+      }
+      if (typeof preset.workflow === "string") {
+        setWorkflow(preset.workflow);
+      }
+      if (preset.projectOverrides && typeof preset.projectOverrides === "object") {
+        setProjectOverrides(preset.projectOverrides);
+      }
+      if (preset.runtimeOverrides && typeof preset.runtimeOverrides === "object") {
+        setRuntimeOverrides(preset.runtimeOverrides);
+      }
+      const source = preset.copiedFrom?.videoId && preset.copiedFrom?.version
+        ? `${preset.copiedFrom.videoId}/${preset.copiedFrom.version}`
+        : "历史任务";
+      setPrefillMessage(`已复制 ${source} 的启动参数，可直接调整后发起新任务。`);
+    } catch {
+      setError("读取复制任务参数失败，请重新复制。");
+    }
+  }, []);
 
   const detectKind = (value: string): "url" | "topic" => {
     return /^(https?:\/\/|youtu\.be\/|youtube\.com)/i.test(value.trim()) ? "url" : "topic";
@@ -153,6 +196,9 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
 
   return (
     <div className="form-card">
+      {prefillMessage ? (
+        <div className="notice success" style={{ marginBottom: 12 }}>{prefillMessage}</div>
+      ) : null}
       <div className="form-group">
         <div className="form-label-row">
           <label htmlFor="input-field" className="form-label">
