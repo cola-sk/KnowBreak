@@ -22,6 +22,17 @@ from ..models import Storyboards
 PEXELS_SEARCH = "https://api.pexels.com/v1/search"
 PIXABAY_SEARCH = "https://pixabay.com/api/"
 MIN_DIM = 1080  # 至少 1080px 宽
+GENERATED_IMAGE_PROVIDERS = {"pollinations", "cloudflare_workers", "huggingface"}
+
+CONTEXT_SOURCE_LABELS = {
+    "title": "Topic title",
+    "visual": "Storyboard visual",
+    "narration": "Storyboard narration",
+    "broll": "B-roll / reference material",
+    "subtitle": "Subtitle",
+    "query": "Image search keywords",
+    "fallback": "Default fallback",
+}
 
 
 class _ShotKw(BaseModel):
@@ -78,9 +89,12 @@ def run(
                 kws = kw_map.get(shot.index, [])
                 query = " ".join(kws[:2]) if kws else shot.broll[:60]
                 img_path = topic_dir / f"shot_{shot.index:03d}.jpg"
-                gen_prompt = gen_prompt_map.get(shot.index, "")
-                if not gen_prompt:
-                    gen_prompt = _build_enhanced_gen_prompt(board.title, shot)
+                gen_prompt = _build_shot_generated_prompt(
+                    board.title,
+                    shot,
+                    query,
+                    core_prompt=gen_prompt_map.get(shot.index, ""),
+                )
                 meta = _fetch_with_fallbacks(
                     cfg,
                     providers,
@@ -189,7 +203,12 @@ def _fetch_cover_image(
     query = " ".join(cover_keywords[:3]) if cover_keywords else board.title
     first_broll = board.shots[0].broll if board.shots else ""
     cover_path = topic_dir / "cover.jpg"
-    prompt_to_use = cover_gen_prompt or _build_cover_gen_prompt(board.title, board.shots[0] if board.shots else None)
+    prompt_to_use = _build_cover_generated_prompt(
+        board.title,
+        board.shots[0] if board.shots else None,
+        query,
+        core_prompt=cover_gen_prompt,
+    )
     meta = _fetch_with_fallbacks(
         cfg,
         _cover_provider_order(providers),
@@ -238,11 +257,12 @@ def _fetch_with_fallbacks(
     else:
         cache_index = {}
 
+    gen_prompt = _compact_text(gen_prompt, 4000)
     seen: set[tuple[str, str]] = set()
     for query in [q.strip() for q in queries if q.strip()]:
         for provider in providers:
             # Resolve actual prompt to use for generation or search
-            if provider in {"pollinations", "cloudflare_workers", "huggingface"}:
+            if provider in GENERATED_IMAGE_PROVIDERS:
                 prompt_to_use = gen_prompt or query
             else:
                 prompt_to_use = query
@@ -252,8 +272,10 @@ def _fetch_with_fallbacks(
                 continue
             seen.add(key)
 
-            # Compute cache key based on provider and prompt_to_use
-            cache_key = hashlib.sha256(f"{provider}:{prompt_to_use}".encode("utf-8")).hexdigest()
+            # Compute cache key based on provider, model, and the actual prompt/query.
+            cache_key = hashlib.sha256(
+                _cache_key_material(cfg, provider, prompt_to_use).encode("utf-8")
+            ).hexdigest()
             cached_item = cache_index.get(cache_key)
             cached_file = cache_dir / f"{cache_key}.jpg"
 
@@ -265,15 +287,15 @@ def _fetch_with_fallbacks(
                     shutil.copy(cached_file, out_path)
                     if source_url:
                         used_source_urls.add(source_url)
-                    print(f"    ✓ [Image Cache Hit] {provider} / {prompt_to_use}")
-                    return {"provider": provider, "query": prompt_to_use, **cached_item}
+                    print(f"    ✓ [Image Cache Hit] {provider} / {query}")
+                    return {"provider": provider, "query": query, **cached_item}
 
             # Cache miss, fetch normally
             if provider == "pexels" and cfg.pexels_api_key:
                 meta = _fetch_pexels(cfg.pexels_api_key, prompt_to_use, out_path, used_source_urls)
             elif provider == "pixabay" and cfg.pixabay_api_key:
                 meta = _fetch_pixabay(cfg.pixabay_api_key, prompt_to_use, out_path, used_source_urls)
-            elif provider in {"pollinations", "cloudflare_workers", "huggingface"}:
+            elif provider in GENERATED_IMAGE_PROVIDERS:
                 meta = _fetch_generated_image(cfg, provider, prompt_to_use, out_path)
             else:
                 meta = None
@@ -295,7 +317,7 @@ def _fetch_with_fallbacks(
                 except Exception as e:
                     print(f"  Warning: failed to save image cache index: {e}")
 
-                return {"provider": provider, "query": prompt_to_use, **meta}
+                return {"provider": provider, "query": query, **meta}
     return None
 
 
@@ -399,45 +421,130 @@ def _fetch_generated_image(cfg: Config, provider: str, prompt: str, out_path: Pa
         return None
 
 
-def _build_enhanced_gen_prompt(title: str, shot) -> str:
-    # Use the rich shot.broll as the primary descriptive prompt for AI generation.
-    prompt_base = shot.broll.strip() if shot.broll else ""
-    if not prompt_base or len(prompt_base) < 10:
-        # Fallback to visual description if broll is empty/short
-        prompt_base = f"A scene depicting: {shot.visual}"
-    
-    # Analyze topic title and prompt_base to determine the target style
-    title_lower = title.lower()
-    prompt_lower = prompt_base.lower()
-    
-    historical_keywords = ["宋慈", "song ci", "洗冤集录", "xiyuan", "朱元璋", "zhu yuanzhang", "明朝", "ming dynasty", "宋代", "song dynasty", "古代", "ancient china", "ancient chinese"]
-    is_historical = any(k in title_lower or k in prompt_lower for k in historical_keywords)
-    
-    if is_historical:
-        # Enhance for historical Chinese drama style (consistent lighting, cinematic look)
-        style_suffix = ", historical Chinese drama setting, realistic cinematography, dramatic lighting, detailed costumes and textures, muted historical color palette, 8k resolution, 9:16 aspect ratio"
+def _cache_key_material(cfg: Config, provider: str, prompt_or_query: str) -> str:
+    if provider == "pollinations":
+        model = cfg.pollinations_image_model or "pollinations"
+    elif provider == "cloudflare_workers":
+        model = cfg.cloudflare_image_model
+    elif provider == "huggingface":
+        model = cfg.huggingface_image_model
     else:
-        # Enhance for modern/scientific topics
-        style_suffix = ", clean modern style, highly detailed digital concept art, vibrant and harmonious color palette, 8k resolution, 9:16 aspect ratio"
-        
-    return f"{prompt_base}{style_suffix}"
+        model = ""
+    return f"{provider}:{model}:{prompt_or_query}"
 
 
-def _build_cover_gen_prompt(title: str, first_shot) -> str:
-    # Covers need extra dramatic impact
-    prompt_base = first_shot.broll.strip() if first_shot and first_shot.broll else title
-    if not prompt_base or len(prompt_base) < 10:
-        prompt_base = title
-        
-    title_lower = title.lower()
-    prompt_lower = prompt_base.lower()
-    
-    historical_keywords = ["宋慈", "song ci", "洗冤集录", "xiyuan", "朱元璋", "zhu yuanzhang", "明朝", "ming dynasty", "宋代", "song dynasty", "古代", "ancient china", "ancient chinese"]
-    is_historical = any(k in title_lower or k in prompt_lower for k in historical_keywords)
-    
-    if is_historical:
-        style_suffix = ", epic historical Chinese movie poster, striking composition, dramatic lighting, rich textures, masterpieces, 8k resolution, photorealistic, 9:16 aspect ratio"
-    else:
-        style_suffix = ", eye-catching modern poster design, vivid contrast, professional digital illustration, epic composition, 8k resolution, 9:16 aspect ratio"
-        
-    return f"{prompt_base}{style_suffix}"
+def _compact_text(value: str | None, max_length: int) -> str | None:
+    if not value:
+        return None
+    trimmed = " ".join(value.split())
+    if not trimmed:
+        return None
+    if len(trimmed) > max_length:
+        return f"{trimmed[:max_length - 1]}..."
+    return trimmed
+
+
+def _first_available_prompt_source(sources: dict[str, str | None], preferred: tuple[str, ...]) -> str:
+    for source in preferred:
+        if _compact_text(sources.get(source), 1):
+            return source
+    return "fallback"
+
+
+def _build_contextual_image_prompt(
+    *,
+    core_prompt: str,
+    item_title: str,
+    prompt_source: str,
+    sources: dict[str, str | None],
+) -> str:
+    core = _compact_text(core_prompt, 520) or core_prompt
+    parts = [
+        "Create one vertical 9:16 image for a Chinese knowledge short video.",
+        "Use the core scene as the main subject. Follow the full context for period, place, people, objects, atmosphere, and visual logic.",
+        "If the context implies a historical period or non-modern setting, keep it period-accurate. Do not add modern clothing, cars, phones, computers, neon signs, glass offices, modern streets, or contemporary city elements unless explicitly requested.",
+        "Style: documentary cinematic realism, natural light, rich environmental detail, no text overlays, no subtitles, no watermark, no logo.",
+        f"Shot/item: {_compact_text(item_title, 120) or item_title}",
+        f"Core scene: {core}",
+    ]
+
+    context_lines: list[str] = []
+    for key, label in CONTEXT_SOURCE_LABELS.items():
+        if key == prompt_source:
+            continue
+        value = _compact_text(sources.get(key), 240)
+        if value:
+            context_lines.append(f"- {label}: {value}")
+    if context_lines:
+        parts.append("Context:")
+        parts.extend(context_lines)
+    return "\n".join(parts)
+
+
+def _build_shot_generated_prompt(
+    title: str,
+    shot,
+    query: str,
+    *,
+    core_prompt: str | None = None,
+) -> str:
+    core_prompt = _compact_text(core_prompt, 2000)
+    fallback = ", ".join(
+        part
+        for part in [
+            shot.visual,
+            shot.broll,
+            shot.subtitle,
+            "vertical 9:16 documentary science image",
+        ]
+        if part
+    )
+    sources = {
+        "title": title,
+        "visual": shot.visual,
+        "narration": shot.narration,
+        "broll": shot.broll,
+        "subtitle": shot.subtitle,
+        "query": query,
+        "fallback": fallback,
+    }
+    prompt_source = "prompt" if _compact_text(core_prompt, 1) else _first_available_prompt_source(
+        sources,
+        ("visual", "narration", "query", "broll", "subtitle", "fallback"),
+    )
+    return _build_contextual_image_prompt(
+        core_prompt=core_prompt or sources.get(prompt_source) or fallback,
+        item_title=f"shot {shot.index}",
+        prompt_source=prompt_source,
+        sources=sources,
+    )
+
+
+def _build_cover_generated_prompt(
+    title: str,
+    first_shot,
+    query: str,
+    *,
+    core_prompt: str | None = None,
+) -> str:
+    core_prompt = _compact_text(core_prompt, 2000)
+    fallback = f"{title}, vertical 9:16 documentary science cover image"
+    sources = {
+        "title": title,
+        "visual": first_shot.visual if first_shot else None,
+        "narration": first_shot.narration if first_shot else None,
+        "broll": first_shot.broll if first_shot else None,
+        "subtitle": first_shot.subtitle if first_shot else None,
+        "query": query,
+        "fallback": fallback,
+    }
+    prompt_source = "prompt" if _compact_text(core_prompt, 1) else _first_available_prompt_source(
+        sources,
+        ("query", "title", "narration", "visual", "broll", "subtitle", "fallback"),
+    )
+    return _build_contextual_image_prompt(
+        core_prompt=core_prompt or sources.get(prompt_source) or fallback,
+        item_title="cover image",
+        prompt_source=prompt_source,
+        sources=sources,
+    )

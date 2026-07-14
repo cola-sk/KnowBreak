@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { VersionActions } from "@/components/version-actions";
@@ -68,9 +69,47 @@ function filterProjects(projects: ProjectSummary[], filter: FilterMode): Project
     .filter((project) => project.versions.length > 0);
 }
 
+function versionDetailHref(
+  videoId: string,
+  version: string,
+  item: {
+    doneStages: string[];
+    review: Partial<Record<(typeof REVIEW_STAGES)[number], ReviewStatus>>;
+  },
+): string {
+  if (item.doneStages.includes("compose")) {
+    return `/projects/${videoId}/${version}/review`;
+  }
+  if (item.review.script_review !== "approved") {
+    return `/projects/${videoId}/${version}/script`;
+  }
+  if (item.review.storyboard_review !== "approved") {
+    return `/projects/${videoId}/${version}/storyboard`;
+  }
+  if (item.review.image_review !== "approved") {
+    return `/projects/${videoId}/${version}/images`;
+  }
+  return `/projects/${videoId}/${version}/script`;
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M6 6l1 14h10l1-14" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  );
+}
+
 export function ProjectsClient({ initialProjects, filter }: Props) {
+  const router = useRouter();
   const [projects, setProjects] = useState(initialProjects);
   const [loading, setLoading] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [operationMessage, setOperationMessage] = useState("");
   const [lastUpdated, setLastUpdated] = useState(() => new Date().toISOString());
   const filteredProjects = filterProjects(projects, filter);
 
@@ -92,6 +131,32 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
     const timer = window.setInterval(refresh, 5000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    setProjects(initialProjects);
+  }, [initialProjects]);
+
+  const deleteProject = async (videoId: string, title: string) => {
+    const confirmed = window.confirm(`确定删除项目记录「${title || videoId}」吗？此操作会删除该项目的所有版本和产物。`);
+    if (!confirmed) {
+      return;
+    }
+    setDeletingProjectId(videoId);
+    setOperationMessage("");
+    try {
+      const response = await fetch(`/api/projects/${videoId}`, { method: "DELETE" });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "删除项目失败");
+      }
+      await refresh();
+      setOperationMessage("项目记录已删除");
+    } catch (error) {
+      setOperationMessage(error instanceof Error ? error.message : "删除项目失败");
+    } finally {
+      setDeletingProjectId(null);
+    }
+  };
 
   return (
     <>
@@ -119,6 +184,9 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
           </button>
         </div>
       </div>
+      {operationMessage ? (
+        <div className="section-subtitle" style={{ marginTop: 8 }}>{operationMessage}</div>
+      ) : null}
 
       {filteredProjects.length === 0 ? (
         <div className="empty-state">
@@ -143,47 +211,76 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
                     <span className="project-version-count">版本数: {project.versions.length}</span>
                   </div>
                 </div>
+                <div className="project-actions" onClick={(event) => event.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="icon-btn danger reveal-delete-btn"
+                    disabled={deletingProjectId !== null}
+                    aria-label={`删除项目记录 ${project.title || project.videoId}`}
+                    onClick={() => deleteProject(project.videoId, project.title)}
+                    title={deletingProjectId === project.videoId ? "删除中..." : "删除项目记录"}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
               </div>
 
               <div className="version-stack">
-                {project.versions.map((v) => (
-                  <div key={`${project.videoId}-${v.version}`} className="version-item">
-                    <div className="version-item-header">
-                      <div className="version-identity">
-                        <span className="version-tag">{v.version}</span>
-                        {v.title && <span className="version-title">{v.title}</span>}
-                        {v.ignored && <span className="badge warning">已忽略</span>}
+                {project.versions.map((v) => {
+                  const detailHref = versionDetailHref(project.videoId, v.version, v);
+                  return (
+                    <div
+                      key={`${project.videoId}-${v.version}`}
+                      className="version-item version-item-clickable"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => router.push(detailHref)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          router.push(detailHref);
+                        }
+                      }}
+                    >
+                      <div className="version-item-header">
+                        <div className="version-identity">
+                          <span className="version-tag">{v.version}</span>
+                          {v.title && <span className="version-title">{v.title}</span>}
+                          {v.ignored && <span className="badge warning">已忽略</span>}
+                        </div>
+                        <div className="version-header-side">
+                          <time className="version-time">
+                            {new Date(v.updatedAt).toLocaleDateString()} {new Date(v.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </time>
+                          <VersionActions
+                            videoId={project.videoId}
+                            version={v.version}
+                            doneStages={v.doneStages}
+                            review={v.review}
+                            detailHref={detailHref}
+                            onChanged={refresh}
+                          />
+                        </div>
                       </div>
-                      <time className="version-time">
-                        {new Date(v.updatedAt).toLocaleDateString()} {new Date(v.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </time>
-                    </div>
 
-                    <div className="version-body">
-                      <div className="version-stages">
-                        <span className="stages-label">已完成阶段:</span>
-                        <span className="stages-value">
-                          {v.doneStages.length > 0 ? v.doneStages.join(" -> ") : "暂无已完成阶段"}
-                        </span>
+                      <div className="version-body">
+                        <div className="version-stages">
+                          <span className="stages-label">已完成阶段:</span>
+                          <span className="stages-value">
+                            {v.doneStages.length > 0 ? v.doneStages.join(" -> ") : "暂无已完成阶段"}
+                          </span>
+                        </div>
+
+                        <div className="version-reviews">
+                          <span className={reviewBadge(v.review.script_review)}>文案: {v.review.script_review ?? "pending"}</span>
+                          <span className={reviewBadge(v.review.storyboard_review)}>分镜: {v.review.storyboard_review ?? "pending"}</span>
+                          <span className={reviewBadge(v.review.image_review)}>图片: {v.review.image_review ?? "pending"}</span>
+                        </div>
                       </div>
 
-                      <div className="version-reviews">
-                        <span className={reviewBadge(v.review.script_review)}>文案: {v.review.script_review ?? "pending"}</span>
-                        <span className={reviewBadge(v.review.storyboard_review)}>分镜: {v.review.storyboard_review ?? "pending"}</span>
-                        <span className={reviewBadge(v.review.image_review)}>图片: {v.review.image_review ?? "pending"}</span>
-                      </div>
                     </div>
-
-                    <div className="version-actions-container">
-                      <VersionActions
-                        videoId={project.videoId}
-                        version={v.version}
-                        ignored={v.ignored}
-                        doneStages={v.doneStages}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

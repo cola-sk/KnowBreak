@@ -133,3 +133,111 @@ def test_generated_provider_fetch_writes_generated_image_metadata(tmp_path: Path
     assert meta["mode"] == "generate"
     assert meta["prompt"] == "science diagram"
     assert meta["model"] == "stabilityai/sdxl"
+
+
+def test_generated_provider_uses_contextual_prompt_and_preserves_query(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    out_path = out_dir / "video123" / "images" / "0" / "shot_000.jpg"
+    out_path.parent.mkdir(parents=True)
+    cfg = Config(
+        llm=LLMConfig(base_url="http://example.invalid/v1", api_key="test", model="test"),
+        asr=ASRConfig(provider="openai", model="test"),
+        tts=TTSConfig(),
+        intro=IntroConfig(),
+        out_dir=out_dir,
+        project_root=tmp_path,
+        image_providers=("cloudflare_workers",),
+        cloudflare_account_id="account",
+        cloudflare_api_token="token",
+    )
+    shot = StoryboardShot(
+        index=3,
+        narration="宋慈发现骨头上的伤痕不是棺木压出来的。",
+        visual="宋慈蹲在坟边检查一根肋骨",
+        broll="bamboo steamer, vinegar jar, rib bone evidence",
+        subtitle="伤痕会说话",
+        duration=3.0,
+    )
+    generated_prompt = images._build_shot_generated_prompt("宋代法医谜案", shot, "rib bone forensic")
+    captured: dict[str, str] = {}
+
+    def fake_generate_text_to_image(cfg, prompt: str, *, provider: str, width: int = 1080, height: int = 1920):
+        captured["prompt"] = prompt
+        return GeneratedImage(
+            content=b"fake-jpeg",
+            metadata={
+                "mode": "generate",
+                "source_url": "",
+                "creator": "ai_generated",
+                "license": "provider_terms",
+                "prompt": prompt,
+                "model": cfg.cloudflare_image_model,
+                "width": width,
+                "height": height,
+            },
+        )
+
+    monkeypatch.setattr(images, "generate_text_to_image", fake_generate_text_to_image)
+
+    meta = images._fetch_with_fallbacks(
+        cfg,
+        ["cloudflare_workers"],
+        ["rib bone forensic"],
+        out_path,
+        set(),
+        gen_prompt=generated_prompt,
+    )
+
+    assert captured["prompt"].startswith("Create one vertical 9:16 image")
+    assert "Core scene: 宋慈蹲在坟边检查一根肋骨" in captured["prompt"]
+    assert "- B-roll / reference material: bamboo steamer, vinegar jar, rib bone evidence" in captured["prompt"]
+    assert meta is not None
+    assert meta["provider"] == "cloudflare_workers"
+    assert meta["query"] == "rib bone forensic"
+    assert meta["prompt"] == captured["prompt"]
+
+
+def test_search_provider_ignores_generated_prompt(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    out_path = out_dir / "video123" / "images" / "0" / "shot_000.jpg"
+    out_path.parent.mkdir(parents=True)
+    cfg = Config(
+        llm=LLMConfig(base_url="http://example.invalid/v1", api_key="test", model="test"),
+        asr=ASRConfig(provider="openai", model="test"),
+        tts=TTSConfig(),
+        intro=IntroConfig(),
+        out_dir=out_dir,
+        project_root=tmp_path,
+        image_providers=("pexels",),
+        pexels_api_key="pexels_key",
+    )
+    captured: dict[str, str] = {}
+
+    def fake_fetch_pexels(api_key: str, query: str, out_path: Path, used_source_urls: set[str]):
+        captured["query"] = query
+        out_path.write_bytes(b"fake-jpeg")
+        return {
+            "mode": "search",
+            "source_url": "https://example.invalid/photo",
+            "creator": "tester",
+            "license": "Pexels License",
+            "width": 1080,
+            "height": 1920,
+        }
+
+    monkeypatch.setattr(images, "_fetch_pexels", fake_fetch_pexels)
+
+    meta = images._fetch_with_fallbacks(
+        cfg,
+        ["pexels"],
+        ["short search keywords"],
+        out_path,
+        set(),
+        gen_prompt="Create one vertical 9:16 image with lots of context.",
+    )
+
+    assert captured["query"] == "short search keywords"
+    assert meta is not None
+    assert meta["provider"] == "pexels"
+    assert meta["query"] == "short search keywords"
+    assert "prompt" not in meta

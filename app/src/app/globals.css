@@ -1244,6 +1244,9 @@ a.tab.active {
   background: var(--panel);
   color: var(--muted);
   box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .icon-btn:hover:not(:disabled) {
@@ -1577,6 +1580,7 @@ a.tab.active {
   border-bottom: 1px solid var(--panel-border);
   padding-bottom: 20px;
   margin-bottom: 20px;
+  gap: 16px;
 }
 
 .project-title {
@@ -1607,6 +1611,35 @@ a.tab.active {
   color: var(--subtle);
 }
 
+.project-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.reveal-delete-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+
+.reveal-action-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+
+.project-card:hover > .project-card-header .reveal-delete-btn,
+.project-card:focus-within > .project-card-header .reveal-delete-btn,
+.version-item:hover .reveal-action-btn,
+.version-item:focus-within .reveal-action-btn,
+.version-item:hover .reveal-delete-btn,
+.version-item:focus-within .reveal-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* Versions stack inside a project */
 .version-stack {
   display: flex;
@@ -1625,6 +1658,15 @@ a.tab.active {
 .version-item:hover {
   border-color: var(--panel-border-hover);
   background: light-dark(#f1f5f9, rgba(255, 255, 255, 0.02));
+}
+
+.version-item-clickable {
+  cursor: pointer;
+}
+
+.version-item-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .version-item-header {
@@ -1664,11 +1706,16 @@ a.tab.active {
   color: var(--subtle);
 }
 
+.version-header-side {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
 .version-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 14px;
 }
 
 .version-stages {
@@ -1696,6 +1743,26 @@ a.tab.active {
 .version-actions-container {
   border-top: 1px solid var(--panel-border);
   padding-top: 12px;
+}
+
+.version-action-link {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.version-action-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* Task Center */

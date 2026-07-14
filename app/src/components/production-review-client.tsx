@@ -7,7 +7,7 @@ import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/com
 import { TtsSettingsPanel } from "@/components/tts-settings-panel";
 import { readImageFileFromClipboard } from "@/lib/clipboard-image";
 import { buildContextualImagePrompt } from "@/lib/image-generation-prompt";
-import type { RegenerationJob, RegenerationJobDetail, ReviewFile, ReviewStage } from "@/lib/types";
+import type { ArtifactStage, RegenerationJob, RegenerationJobDetail, ReviewFile, ReviewStage } from "@/lib/types";
 import {
   compactRuntimeOverrides,
   countRuntimeOverrideLeaves,
@@ -199,6 +199,12 @@ const PROMPT_SOURCE_LABELS: Record<PromptSource, string> = {
   fallback: "默认提示词",
 };
 
+const REVIEW_STAGE_LABELS: Record<ReviewStage, string> = {
+  script_review: "脚本",
+  storyboard_review: "分镜",
+  image_review: "图片",
+};
+
 function defaultModelForProvider(provider: string): string {
   return IMAGE_PROVIDER_OPTIONS.find((option) => option.value === provider)?.defaultModel ?? "";
 }
@@ -311,10 +317,12 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => new Date().toISOString());
   const [refreshing, setRefreshing] = useState(false);
+  const [approvingProduction, setApprovingProduction] = useState(false);
   const [activeJobDetail, setActiveJobDetail] = useState<RegenerationJobDetail | null>(null);
   const [showJobLog, setShowJobLog] = useState(false);
   const [jobNotice, setJobNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const [dirtyStages, setDirtyStages] = useState<Set<ArtifactStage>>(() => new Set());
   const previousJobRef = useRef<{ id: string; status: RegenerationJob["status"] } | null>(null);
 
   // Project overrides state
@@ -343,6 +351,14 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   const sourceInputEnabled = sourceInputApplies(startFrom);
   const sourceInputLabel = data.workflowSteps.includes("asr") ? "source / 视频源" : "topic / 主题输入";
   const imageToken = data.reviews.image_review?.updated_at ?? data.job?.finishedAt ?? data.version;
+  const allReviewStagesApproved = (
+    data.reviews.script_review?.status === "approved"
+    && data.reviews.storyboard_review?.status === "approved"
+    && data.reviews.image_review?.status === "approved"
+  );
+  const pendingReviewLabels = (Object.entries(REVIEW_STAGE_LABELS) as Array<[ReviewStage, string]>)
+    .filter(([stage]) => data.reviews[stage]?.status !== "approved")
+    .map(([, label]) => label);
   const workflowStageProgress = useMemo(() => {
     const artifactDone: Record<string, boolean> = {
       script: Boolean(data.artifacts.script),
@@ -373,6 +389,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       setRuntimeOverrides(payload.runtimeOverrides ?? {});
       setLastRefreshedAt(new Date().toISOString());
       setIsDirty(false);
+      setDirtyStages(new Set());
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "刷新失败");
     } finally {
@@ -550,8 +567,17 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     previousJobRef.current = current;
   }, [data.job, data.version]);
 
-  const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
+  const markDirty = (...stages: ArtifactStage[]) => {
     setIsDirty(true);
+    setDirtyStages((prev) => {
+      const next = new Set(prev);
+      stages.forEach((stage) => next.add(stage));
+      return next;
+    });
+  };
+
+  const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
+    markDirty("script");
     setData((prev) => {
       if (!prev.artifacts.script) {
         return prev;
@@ -582,7 +608,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   };
 
   const updateScriptCoverNarration = (value: string) => {
-    setIsDirty(true);
+    markDirty("script");
     setData((prev) => {
       if (!prev.artifacts.script) {
         return prev;
@@ -601,7 +627,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   };
 
   const updateScriptTitle = (value: string) => {
-    setIsDirty(true);
+    markDirty("script", "storyboard", "images");
     setData((prev) => {
       const nextArtifacts = { ...prev.artifacts };
       if (prev.artifacts.script) {
@@ -636,7 +662,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   };
 
   const updateShot = (shotIndex: number, key: keyof Shot, value: string) => {
-    setIsDirty(true);
+    markDirty("storyboard");
     setData((prev) => {
       if (!prev.artifacts.storyboard) {
         return prev;
@@ -672,7 +698,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     key: keyof ImageEntry,
     value: string,
   ) => {
-    setIsDirty(true);
+    markDirty("images");
     setData((prev) => {
       if (!prev.artifacts.images) {
         return prev;
@@ -696,7 +722,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   };
 
   const deleteImage = (kind: "cover" | "shot", shotIndex: number | undefined) => {
-    setIsDirty(true);
+    markDirty("images");
     setData((prev) => {
       if (!prev.artifacts.images) {
         return prev;
@@ -736,8 +762,9 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   }> => {
     const nextReviews: Partial<Record<ReviewStage, ReviewFile>> = { ...data.reviews };
     const nextArtifacts = { ...data.artifacts };
+    const stagesToSave = new Set(dirtyStages);
 
-    if (data.artifacts.script) {
+    if (data.artifacts.script && stagesToSave.has("script")) {
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/script`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -751,7 +778,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       nextReviews.script_review = payload.review;
     }
 
-    if (data.artifacts.storyboard) {
+    if (data.artifacts.storyboard && stagesToSave.has("storyboard")) {
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/storyboard`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -765,7 +792,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       nextReviews.storyboard_review = payload.review;
     }
 
-    if (data.artifacts.images) {
+    if (data.artifacts.images && stagesToSave.has("images")) {
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -790,10 +817,38 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       await persistEdits();
       setMessage("已保存所有页面的修改。需要更新 MP4 时请选择阶段并点击重生成。");
       setIsDirty(false);
+      setDirtyStages(new Set());
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const approveProduction = async () => {
+    setApprovingProduction(true);
+    setMessage("");
+    try {
+      if (isDirty) {
+        await persistEdits();
+        setIsDirty(false);
+        setDirtyStages(new Set());
+      }
+      const response = await fetch(`/api/projects/${data.videoId}/${data.version}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve_all" }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "标记通过失败");
+      }
+      await refreshData();
+      setMessage("成片已标记通过，脚本/分镜/图片审核状态已同步为 approved。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "标记通过失败");
+    } finally {
+      setApprovingProduction(false);
     }
   };
 
@@ -803,6 +858,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       setProjectOverrides(initial.projectOverrides ?? {});
       setRuntimeOverrides(initial.runtimeOverrides ?? {});
       setIsDirty(false);
+      setDirtyStages(new Set());
       setMessage("已放弃所有未保存的修改");
     }
   };
@@ -964,6 +1020,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       if (saveBeforeRun) {
         await persistEdits();
         setIsDirty(false);
+        setDirtyStages(new Set());
       }
       saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/regenerate`, {
@@ -1016,11 +1073,24 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
               <button type="button" className="btn secondary-btn compact-btn" onClick={refreshData} disabled={refreshing || saving}>
                 {refreshing ? "刷新中" : "刷新状态"}
               </button>
-              {Object.entries(data.reviews).map(([stage, review]) => (
-                <span key={stage} className={statusClass(review?.status)}>
-                  {stage}: {review?.status}
-                </span>
-              ))}
+              {allReviewStagesApproved ? (
+                <span className="approved-pill">成片已通过</span>
+              ) : (
+                <>
+                  {pendingReviewLabels.length > 0 ? (
+                    <span className="badge warning">待处理：{pendingReviewLabels.join(" / ")}</span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="approve-btn compact-btn"
+                    disabled={saving || regenerating || refreshing || approvingProduction}
+                    onClick={approveProduction}
+                    title="保存当前页面修改，并将脚本/分镜/图片审核标记为通过"
+                  >
+                    {approvingProduction ? "处理中..." : "通过成片审核"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
           <div className="section-subtitle" style={{ marginTop: 8 }}>

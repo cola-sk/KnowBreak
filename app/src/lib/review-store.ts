@@ -725,6 +725,34 @@ export async function setVersionIgnored(
   return next;
 }
 
+export async function deleteVersionRecord(videoId: string, version: string): Promise<{
+  deleted: true;
+  path: string;
+}> {
+  if (version === "legacy") {
+    throw new Error("Legacy version uses the project root. Delete the project record instead.");
+  }
+  const versionDir = getVersionDir(videoId, version);
+  if (!existsSync(versionDir)) {
+    throw new Error(`Version not found: ${version}`);
+  }
+  await fs.rm(versionDir, { recursive: true, force: true });
+  return { deleted: true, path: versionDir };
+}
+
+export async function deleteProjectRecord(videoId: string): Promise<{
+  deleted: true;
+  path: string;
+}> {
+  const safeVideoId = ensureSafeSegment("video_id", videoId);
+  const projectDir = path.join(resolveOutDir(), safeVideoId);
+  if (!existsSync(projectDir)) {
+    throw new Error(`Project not found: ${videoId}`);
+  }
+  await fs.rm(projectDir, { recursive: true, force: true });
+  return { deleted: true, path: projectDir };
+}
+
 export async function readRegenerationJob(
   videoId: string,
   version: string,

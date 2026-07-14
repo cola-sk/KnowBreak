@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { approveAllReviewStages, setVersionIgnored } from "@/lib/review-store";
+import { approveAllReviewStages, deleteProjectRecord, deleteVersionRecord, setVersionIgnored } from "@/lib/review-store";
 
-type Action = "approve_all" | "ignore" | "unignore";
+type Action = "approve_all" | "ignore" | "unignore" | "delete_version" | "delete_project";
 
 export async function POST(
   request: Request,
@@ -28,6 +28,14 @@ export async function POST(
     if (action === "unignore") {
       const flags = await setVersionIgnored(videoId, version, false);
       return NextResponse.json({ ok: true, flags });
+    }
+    if (action === "delete_version") {
+      const result = await deleteVersionRecord(videoId, version);
+      return NextResponse.json({ ok: true, ...result });
+    }
+    if (action === "delete_project") {
+      const result = await deleteProjectRecord(videoId);
+      return NextResponse.json({ ok: true, ...result });
     }
 
     return NextResponse.json({ error: `unknown action: ${String(action)}` }, { status: 400 });
