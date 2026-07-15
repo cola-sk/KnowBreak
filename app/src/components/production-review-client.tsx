@@ -1112,57 +1112,65 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {/* 流程状态及头部操作区域（抽出为通栏） */}
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 18 }}>成片播放检查</div>
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>
+              workflow: {data.workflow}, source: {data.source}
+            </div>
+          </div>
+          <div className="row">
+            <button type="button" className="btn secondary-btn compact-btn" onClick={refreshData} disabled={refreshing || saving}>
+              {refreshing ? "刷新中" : "刷新状态"}
+            </button>
+            {allReviewStagesApproved ? (
+              <span className="approved-pill">审核已通过</span>
+            ) : hasConfiguredReviewStages ? (
+              <>
+                {pendingReviewLabels.length > 0 ? (
+                  <span className="badge warning">待处理：{pendingReviewLabels.join(" / ")}</span>
+                ) : null}
+                <button
+                  type="button"
+                  className="approve-btn compact-btn"
+                  disabled={saving || regenerating || refreshing || approvingProduction}
+                  onClick={approveProduction}
+                  title="保存当前页面修改，并将当前工作流配置的审核阶段标记为通过"
+                >
+                  {approvingProduction ? "处理中..." : "同步通过审核"}
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
+        <div className="section-subtitle" style={{ marginTop: 8 }}>
+          状态更新于 {new Date(lastRefreshedAt).toLocaleTimeString()}
+        </div>
+
+        {workflowStageProgress.length > 0 ? (
+          <div className="compact-stage-strip" style={{ marginTop: 12 }}>
+            {workflowStageProgress.map((item) => (
+              <span key={item.stage} className={`compact-stage ${item.done ? "done" : ""}`}>
+                {STAGE_LABELS[item.stage] ?? item.stage}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
       <div className="production-layout">
-        <section className="panel" style={{ padding: 16 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 18 }}>成片播放检查</div>
-              <div style={{ color: "var(--muted)", fontSize: 13 }}>
-                workflow: {data.workflow}, source: {data.source}
-              </div>
-            </div>
-            <div className="row">
-              <button type="button" className="btn secondary-btn compact-btn" onClick={refreshData} disabled={refreshing || saving}>
-                {refreshing ? "刷新中" : "刷新状态"}
-              </button>
-              {allReviewStagesApproved ? (
-                <span className="approved-pill">审核已通过</span>
-              ) : hasConfiguredReviewStages ? (
-                <>
-                  {pendingReviewLabels.length > 0 ? (
-                    <span className="badge warning">待处理：{pendingReviewLabels.join(" / ")}</span>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="approve-btn compact-btn"
-                    disabled={saving || regenerating || refreshing || approvingProduction}
-                    onClick={approveProduction}
-                    title="保存当前页面修改，并将当前工作流配置的审核阶段标记为通过"
-                  >
-                    {approvingProduction ? "处理中..." : "同步通过审核"}
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </div>
-          <div className="section-subtitle" style={{ marginTop: 8 }}>
-            状态更新于 {new Date(lastRefreshedAt).toLocaleTimeString()}
-          </div>
-
-          {workflowStageProgress.length > 0 ? (
-            <div className="compact-stage-strip">
-              {workflowStageProgress.map((item) => (
-                <span key={item.stage} className={`compact-stage ${item.done ? "done" : ""}`}>
-                  {STAGE_LABELS[item.stage] ?? item.stage}
-                </span>
-              ))}
-            </div>
-          ) : null}
-
+        {/* 左侧：成片播放与视频切换 */}
+        <section className="panel" style={{ padding: 16, display: "flex", flexDirection: "column", alignItems: "center" }}>
           {data.videos.length > 1 ? (
-            <div style={{ marginTop: 12 }}>
-              <label style={{ fontSize: 12, color: "var(--muted)" }}>选择成片</label>
-              <select value={topicIndex} onChange={(event) => setTopicIndex(Number(event.target.value))}>
+            <div style={{ width: "100%", marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>选择成片</label>
+              <select 
+                value={topicIndex} 
+                onChange={(event) => setTopicIndex(Number(event.target.value))}
+                style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)" }}
+              >
                 {data.videos.map((video) => (
                   <option key={video.topic_index} value={video.topic_index}>
                     #{video.topic_index} {video.title}
@@ -1173,25 +1181,30 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
           ) : null}
 
           {selectedVideo ? (
-            <div style={{ marginTop: 12 }}>
-              <video
-                controls
-                playsInline
-                src={assetUrl(selectedVideo.path, data.job?.finishedAt)}
-                style={{ width: "100%", maxHeight: 720, borderRadius: 12, background: "#0f0f0f" }}
-              />
-              <div className="row" style={{ marginTop: 8 }}>
+            <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+              {/* 虚拟手机边框，限制 9:16 视频尺寸并提升美感 */}
+              <div className="phone-preview-container">
+                <div className="phone-preview-notch"></div>
+                <video
+                  controls
+                  playsInline
+                  src={assetUrl(selectedVideo.path, data.job?.finishedAt)}
+                  className="phone-preview-video"
+                />
+              </div>
+              <div className="row" style={{ marginTop: 12, justifyContent: "center", width: "100%" }}>
                 <span className="badge">topic: {selectedVideo.topic_index}</span>
                 <span className="badge">duration: {Math.round(selectedVideo.duration ?? 0)}s</span>
                 <span className="badge">intro: {selectedVideo.intro_duration ?? 0}s</span>
               </div>
             </div>
           ) : (
-            <div style={{ marginTop: 12, color: "var(--danger)" }}>没有找到可播放的 MP4。</div>
+            <div style={{ color: "var(--danger)" }}>没有找到可播放的 MP4。</div>
           )}
         </section>
 
-        <section className="panel" style={{ padding: 16 }}>
+        {/* 右侧：MP4 视频重生成面板，启用粘性随动 */}
+        <section className="panel sticky-side-panel" style={{ padding: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 18 }}>MP4 视频重生成</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
             配置重生成参数并合成新的 MP4 视频。

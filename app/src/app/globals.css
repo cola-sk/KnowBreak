@@ -2785,9 +2785,46 @@ a.tab.active {
 /* Production layout / Review layout specifics */
 .production-layout {
   display: grid;
-  grid-template-columns: minmax(360px, 1.2fr) minmax(320px, 0.8fr);
+  grid-template-columns: 380px 1fr;
   gap: 24px;
   align-items: start;
+}
+
+.sticky-side-panel {
+  position: sticky;
+  top: 88px; /* 64px header height + 24px spacing */
+  height: fit-content;
+}
+
+.phone-preview-container {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 9 / 16;
+  border: 10px solid var(--ink, #171717);
+  border-radius: 36px;
+  background: #000;
+  overflow: hidden;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.phone-preview-notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 18px;
+  background: var(--ink, #171717);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  z-index: 10;
+}
+
+.phone-preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .review-columns {
@@ -2822,6 +2859,12 @@ a.tab.active {
   grid-template-columns: 240px 1fr;
   gap: 20px;
   align-items: start;
+}
+
+.cover-summary {
+  position: sticky;
+  top: 88px;
+  height: fit-content;
 }
 
 .cover-preview {
