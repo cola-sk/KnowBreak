@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#f5f5fa" rx="64"/>
+
+  <!-- 六边形完整轮廓 -->
+  <polygon points="351.2627944162883,311.0 256.0,366.0 160.73720558371173,311.0 160.73720558371176,201.0 255.99999999999997,146.0 351.2627944162882,200.99999999999994" fill="none" stroke="#c8aaaa" stroke-width="3"/>
+
+  <!-- 拆解碎片 -->
+  <polygon points="351.2627944162883,289.0 256.0,344.0 256,256" fill="rgba(232,100,108,0.9)" stroke="#e8646c" stroke-width="2"/>
+<polygon points="182.73720558371173,311.0 182.73720558371176,201.0 256,256" fill="rgba(50,30,35,0.75)" stroke="#e8646c" stroke-width="2"/>
+<polygon points="233.99999999999997,150.0 329.2627944162882,204.99999999999994 256,256" fill="rgba(252,165,165,0.7)" stroke="#e8646c" stroke-width="2"/>
+
+  <!-- 中心锚点 -->
+  <circle cx="256" cy="256" r="7" fill="#c0392b"/>
+
+  <!-- 连线 -->
+  <line x1="256" y1="256" x2="303.6313972081441" y2="316.5" stroke="#c8aaaa" stroke-width="2"/>
+<line x1="256" y1="256" x2="182.73720558371173" y2="256.0" stroke="#c8aaaa" stroke-width="2"/>
+<line x1="256" y1="256" x2="281.6313972081441" y2="177.49999999999997" stroke="#c8aaaa" stroke-width="2"/>
+
+</svg>

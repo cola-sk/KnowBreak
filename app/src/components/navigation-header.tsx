@@ -16,7 +16,7 @@ export function NavigationHeader() {
     <header className="global-header">
       <div className="header-container">
         <Link href="/" className="header-logo">
-          <span className="logo-icon">🎬</span>
+          <img src="/static/logo-nav.svg" alt="KnowBreak" className="logo-icon-img" />
           <span className="logo-text">
             KnowBreak <span className="logo-subtext">Review</span>
           </span>

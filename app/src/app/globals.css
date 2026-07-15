@@ -110,9 +110,10 @@ code, pre {
   letter-spacing: -0.02em;
 }
 
-.logo-icon {
-  font-size: 20px;
-  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.2));
+.logo-icon-img {
+  width: 48px;
+  height: 48px;
+  filter: drop-shadow(0 2px 6px rgba(232, 100, 108, 0.25));
 }
 
 .logo-subtext {
