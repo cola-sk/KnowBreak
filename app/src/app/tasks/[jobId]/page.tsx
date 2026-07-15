@@ -15,7 +15,7 @@ export default async function TaskDetailPage({ params }: Props) {
 
   if (!detail) {
     return (
-      <main className="shell">
+      <main className="shell task-shell">
         <div className="empty-state">
           <h1 className="empty-title">任务不存在</h1>
           <p className="empty-desc">没有找到任务 ID：{jobId}</p>
@@ -26,7 +26,7 @@ export default async function TaskDetailPage({ params }: Props) {
   }
 
   return (
-    <main className="shell">
+    <main className="shell task-shell">
       <div className="page-header">
         <div className="hero-eyebrow">Task Detail</div>
         <h1 className="hero-title">任务详情</h1>

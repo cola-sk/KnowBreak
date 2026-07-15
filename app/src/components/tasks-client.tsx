@@ -21,6 +21,13 @@ interface TaskDetailClientProps {
   initial: StartJobDetail;
 }
 
+interface ResumeStartResponse {
+  ok?: boolean;
+  resumedFrom?: string;
+  job?: StartJob;
+  error?: string;
+}
+
 type InlineReviewStage = "script_review" | "storyboard_review" | "image_review";
 
 interface ReviewDrawerState {
@@ -204,7 +211,7 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
   const [detail, setDetail] = useState(initial);
   const [lastUpdated, setLastUpdated] = useState<string>(() => new Date().toISOString());
   const [loading, setLoading] = useState(false);
-  const [actionLoading, setActionLoading] = useState<"cancel" | "delete" | null>(null);
+  const [actionLoading, setActionLoading] = useState<"cancel" | "resume" | "delete" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewDrawer, setReviewDrawer] = useState<ReviewDrawerState | null>(null);
 
@@ -263,6 +270,35 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
       router.refresh();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "删除任务记录失败");
+      setActionLoading(null);
+    }
+  };
+
+  const resumeJob = async (stageOverride?: string) => {
+    const stage = stageOverride || detail.currentStage || detail.job.startFrom;
+    if (!stage) {
+      setActionError("当前日志没有可恢复阶段，请从首页重新发起任务。");
+      return;
+    }
+    if (!window.confirm(`确定从出错阶段「${stageLabel(stage)}」重试吗？`)) {
+      return;
+    }
+    setActionLoading("resume");
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/start/${detail.job.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "resume", startFrom: stage }),
+      });
+      const payload = (await response.json()) as ResumeStartResponse;
+      if (!response.ok || !payload.job?.id) {
+        throw new Error(payload.error ?? "续跑任务失败");
+      }
+      router.push(`/tasks/${payload.job.id}`);
+      router.refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "续跑任务失败");
       setActionLoading(null);
     }
   };
@@ -330,14 +366,16 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
   }, [detail.job.id, detail.job.status]);
 
   const activeReviewStage = inlineReviewStage(detail.currentStage);
+  const retryStage = detail.currentStage || detail.job.startFrom || null;
+  const canRetryFailedStage = (detail.job.status === "failed" || detail.job.status === "canceled") && Boolean(retryStage);
 
   return (
     <div className="task-page-stack">
-      <section className="panel task-detail-panel">
-        <div className="task-card-head">
-          <div>
+      <section className="panel task-detail-panel task-detail-overview">
+        <div className="task-detail-head">
+          <div className="task-detail-main">
             <div className="task-title">{detail.job.input || detail.job.source}</div>
-            <div className="task-meta">
+            <div className="task-meta task-detail-meta">
               <code>{detail.job.id}</code>
               <span>{detail.job.workflow}</span>
               {detail.job.pid ? <span>pid: {detail.job.pid}</span> : null}
@@ -345,15 +383,33 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
           </div>
           <span className={statusClass(detail.job.status)}>{detail.job.status}</span>
         </div>
-        <div className="task-meta-grid">
-          <span>source：{detail.job.source}</span>
-          <span>开始：{formatTime(detail.job.startedAt)}</span>
-          <span>结束：{formatTime(detail.job.finishedAt)}</span>
-          <span>日志更新时间：{formatTime(detail.logUpdatedAt)}</span>
-          <span>video_id：{detail.job.videoId ?? "-"}</span>
-          <span>version：{detail.job.version ?? "-"}</span>
+        <div className="task-meta-grid task-detail-fields">
+          <div className="task-field task-field-wide">
+            <span className="task-field-label">source</span>
+            <span className="task-field-value">{detail.job.source}</span>
+          </div>
+          <div className="task-field">
+            <span className="task-field-label">开始</span>
+            <span className="task-field-value">{formatTime(detail.job.startedAt)}</span>
+          </div>
+          <div className="task-field">
+            <span className="task-field-label">结束</span>
+            <span className="task-field-value">{formatTime(detail.job.finishedAt)}</span>
+          </div>
+          <div className="task-field">
+            <span className="task-field-label">日志更新</span>
+            <span className="task-field-value">{formatTime(detail.logUpdatedAt)}</span>
+          </div>
+          <div className="task-field">
+            <span className="task-field-label">video_id</span>
+            <span className="task-field-value">{detail.job.videoId ?? "-"}</span>
+          </div>
+          <div className="task-field">
+            <span className="task-field-label">version</span>
+            <span className="task-field-value">{detail.job.version ?? "-"}</span>
+          </div>
         </div>
-        <div className="task-actions">
+        <div className="task-actions task-detail-actions">
           <button type="button" className="btn secondary-btn compact-btn" onClick={refresh} disabled={loading}>
             {loading ? "刷新中" : "刷新状态"}
           </button>
@@ -366,7 +422,7 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
             {actionLoading === "delete" ? "删除中" : "删除任务记录"}
           </button>
           {detail.job.videoId && detail.job.version ? (
-            <Link className="btn primary-btn compact-btn" href={`/projects/${detail.job.videoId}/${detail.job.version}/review`}>
+            <Link className="btn primary-btn compact-btn task-open-project-btn" href={`/projects/${detail.job.videoId}/${detail.job.version}/review`}>
               打开项目详情
             </Link>
           ) : null}
@@ -388,8 +444,18 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
             </button>
           </div>
         ) : null}
-        {actionError ? <div className="task-error">{actionError}</div> : null}
-        {detail.job.error ? <div className="task-error">{detail.job.error}</div> : null}
+        {actionError ? (
+          <div className="task-error task-detail-error">
+            <span className="task-error-label">操作失败</span>
+            <span>{actionError}</span>
+          </div>
+        ) : null}
+        {detail.job.error ? (
+          <div className="task-error task-detail-error">
+            <span className="task-error-label">错误</span>
+            <span>{detail.job.error}</span>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel task-detail-panel">
@@ -400,12 +466,15 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
               key={`${stage.index}-${stage.stage}`}
               stage={stage}
               current={detail.currentStage === stage.stage}
+              canRetry={canRetryFailedStage && retryStage === stage.stage}
+              retryLoading={actionLoading === "resume"}
               canReview={Boolean(
                 inlineReviewStage(stage.stage)
                 && detail.job.videoId
                 && detail.job.version
                 && (detail.currentStage === stage.stage || stage.artifactExists),
               )}
+              onRetry={() => resumeJob(stage.stage)}
               onReview={(reviewStage) => openInlineReview(reviewStage)}
             />
           ))}
@@ -438,17 +507,23 @@ export function TaskDetailClient({ initial }: TaskDetailClientProps) {
 function StageProgressRow({
   stage,
   current,
+  canRetry,
+  retryLoading,
   canReview,
+  onRetry,
   onReview,
 }: {
   stage: JobStageProgress;
   current: boolean;
+  canRetry: boolean;
+  retryLoading: boolean;
   canReview: boolean;
+  onRetry: () => void;
   onReview: (stage: InlineReviewStage) => void;
 }) {
   const reviewStage = inlineReviewStage(stage.stage);
   return (
-    <div className={`stage-progress-row ${current ? "current" : ""}`}>
+    <div className={`stage-progress-row ${current ? "current" : ""} ${stage.status}`}>
       <div className="stage-progress-index">{stage.index + 1}</div>
       <div className="stage-progress-main">
         <div className="stage-progress-title">
@@ -458,7 +533,12 @@ function StageProgressRow({
           {stage.artifact ? `${stage.artifact}${stage.artifactExists ? " 已生成" : " 未生成"}` : "无产物文件"}
         </div>
       </div>
-      <div className="row" style={{ alignItems: "center" }}>
+      <div className="stage-progress-actions">
+        {canRetry ? (
+          <button type="button" className="btn primary-btn compact-btn" onClick={onRetry} disabled={retryLoading}>
+            {retryLoading ? "重试中" : "重试"}
+          </button>
+        ) : null}
         {reviewStage && canReview ? (
           <button type="button" className="btn secondary-btn compact-btn" onClick={() => onReview(reviewStage)}>
             进入审核

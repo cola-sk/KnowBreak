@@ -207,7 +207,7 @@ code, pre {
   margin-top: 8px;
   font-size: 15px;
   color: var(--muted);
-  max-width: 720px;
+  max-width: 900px;
   line-height: 1.6;
 }
 
@@ -1924,6 +1924,10 @@ a.tab.active {
   gap: 18px;
 }
 
+.task-shell {
+  max-width: 1800px;
+}
+
 .task-list {
   display: grid;
   gap: 8px;
@@ -1933,7 +1937,7 @@ a.tab.active {
 .task-detail-panel {
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 16px;
   box-shadow: var(--shadow-sm);
 }
@@ -1957,6 +1961,28 @@ a.tab.active {
   align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.task-detail-overview {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 20px;
+}
+
+.task-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.task-detail-main {
+  min-width: 0;
+}
+
+.task-detail-overview .task-title {
+  font-size: 16px;
+  line-height: 1.35;
 }
 
 .task-card .task-card-head {
@@ -2012,12 +2038,72 @@ a.tab.active {
   color: var(--accent);
 }
 
+.task-detail-meta {
+  margin-top: 7px;
+}
+
 .task-meta-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px 14px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.task-detail-fields {
+  grid-template-columns: minmax(260px, 1.8fr) repeat(4, minmax(150px, 1fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: light-dark(#f8fafc, rgba(255, 255, 255, 0.025));
+}
+
+.task-field {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-left: 1px solid var(--panel-border);
+}
+
+.task-field:first-child,
+.task-field:nth-child(5) {
+  border-left: 0;
+}
+
+.task-field:nth-child(n + 5) {
+  border-top: 1px solid var(--panel-border);
+}
+
+.task-field-wide {
+  grid-column: span 2;
+}
+
+.task-field-label {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.task-field-value {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.task-detail-actions {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-open-project-btn {
+  margin-left: auto;
 }
 
 .task-summary-row {
@@ -2036,6 +2122,26 @@ a.tab.active {
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.task-detail-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.task-error-label {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: light-dark(#ffffff, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--danger-border);
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
 }
 
 .task-card .task-error {
@@ -2119,6 +2225,20 @@ a.tab.active {
   background: var(--accent-light);
 }
 
+.stage-progress-row.failed {
+  border-color: var(--danger-border);
+  background: var(--danger-light);
+}
+
+.stage-progress-row.done .stage-progress-index {
+  color: var(--success);
+}
+
+.stage-progress-row.failed .stage-progress-index {
+  background: var(--danger);
+  color: #fff;
+}
+
 .stage-progress-index {
   width: 28px;
   height: 28px;
@@ -2150,6 +2270,14 @@ a.tab.active {
   font-size: 12px;
   margin-top: 2px;
   overflow-wrap: anywhere;
+}
+
+.stage-progress-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: max-content;
 }
 
 .task-log {
@@ -2577,6 +2705,47 @@ a.tab.active {
 
   .filter-stats {
     text-align: right;
+  }
+
+  .task-detail-head,
+  .task-detail-actions {
+    align-items: stretch;
+  }
+
+  .task-detail-head {
+    flex-direction: column;
+  }
+
+  .task-detail-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .task-field,
+  .task-field:first-child,
+  .task-field:nth-child(5) {
+    border-left: 0;
+  }
+
+  .task-field:nth-child(n + 2) {
+    border-top: 1px solid var(--panel-border);
+  }
+
+  .task-field-wide {
+    grid-column: auto;
+  }
+
+  .task-open-project-btn {
+    margin-left: 0;
+  }
+
+  .stage-progress-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .stage-progress-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    min-width: 0;
   }
 }
 

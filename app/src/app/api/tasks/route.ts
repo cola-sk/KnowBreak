@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { listStartJobs, readJobDetail } from "@/lib/start-store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const jobs = await listStartJobs();

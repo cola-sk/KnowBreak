@@ -92,6 +92,7 @@ export async function POST(request: Request) {
 
     const initial: StartJob = {
       id: jobId,
+      taskType: "start",
       status: "running",
       input: body.input ?? "",
       source,
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
       command,
       logPath: relativeJobLogPath(jobId),
       startedAt: new Date().toISOString(),
+      mode: "create",
     };
     await writeJobMeta(initial);
 
