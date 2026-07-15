@@ -11,6 +11,7 @@ import {
   countRuntimeOverrideLeaves,
   effectiveTtsSettings,
   saveTtsHistoryItem,
+  type ImageRuntimeDefaults,
   type ProjectRuntimeOverrides,
   type TtsRuntimeDefaults,
 } from "@/lib/tts-settings";
@@ -20,6 +21,7 @@ interface Props {
   profileBase: Record<string, unknown>;
   globalOverrides: Record<string, unknown>;
   ttsDefaults: TtsRuntimeDefaults;
+  imageDefaults: ImageRuntimeDefaults;
 }
 
 interface StartResponse {
@@ -55,7 +57,7 @@ interface StartPreset {
 
 const START_PRESET_STORAGE_KEY = "kb_start_preset";
 
-export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults }: Props) {
+export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults, imageDefaults }: Props) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [workflow, setWorkflow] = useState("topic_seed_review");
@@ -71,6 +73,30 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
   const [showConfig, setShowConfig] = useState(false);
   const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
   const projectConfigOverrideCount = countOverrideLeaves(projectOverrides) + countRuntimeOverrideLeaves(runtimeOverrides);
+
+  const updateRuntimeTts = (next: ProjectRuntimeOverrides) => {
+    setRuntimeOverrides((prev) => {
+      const merged: ProjectRuntimeOverrides = { ...prev };
+      if (next.tts) {
+        merged.tts = next.tts;
+      } else {
+        delete merged.tts;
+      }
+      return merged;
+    });
+  };
+
+  const updateRuntimeImage = (next: ProjectRuntimeOverrides) => {
+    setRuntimeOverrides((prev) => {
+      const merged: ProjectRuntimeOverrides = { ...prev };
+      if (next.image) {
+        merged.image = next.image;
+      } else {
+        delete merged.image;
+      }
+      return merged;
+    });
+  };
 
   useEffect(() => {
     const raw = window.sessionStorage.getItem(START_PRESET_STORAGE_KEY);
@@ -119,7 +145,9 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
     setError("");
     setStatus("正在启动...");
     try {
-      saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
+      if (runtimeOverrides.tts) {
+        saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
+      }
       const response = await fetch("/api/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -265,7 +293,7 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
           style={{ width: "100%", justifyContent: "space-between", padding: "12px 18px" }}
         >
           <span>自定义当前项目专属参数 {projectConfigOverrideCount > 0 ? `(${projectConfigOverrideCount} 项修改)` : ""}</span>
-          <span>打开封面 / 内容 / TTS</span>
+          <span>打开封面 / 内容 / TTS / 图片</span>
         </button>
         <div className="section-subtitle">
           仅对本次启动任务生效；未修改字段使用当前默认配置。
@@ -281,7 +309,10 @@ export function StartForm({ workflows, profileBase, globalOverrides, ttsDefaults
           onChange={setProjectOverrides}
           ttsValue={runtimeOverrides}
           ttsDefaults={ttsDefaults}
-          onTtsChange={setRuntimeOverrides}
+          onTtsChange={updateRuntimeTts}
+          imageValue={runtimeOverrides}
+          imageDefaults={imageDefaults}
+          onImageChange={updateRuntimeImage}
           ttsDisabled={submitting}
           onClose={() => setShowConfig(false)}
         />

@@ -10,8 +10,10 @@ import type { ArtifactStage, RegenerationJob, RegenerationJobDetail, ReviewFile,
 import {
   compactRuntimeOverrides,
   countRuntimeOverrideLeaves,
+  effectiveImageSettings,
   effectiveTtsSettings,
   saveTtsHistoryItem,
+  type ImageRuntimeDefaults,
   type ProjectRuntimeOverrides,
   type TtsRuntimeDefaults,
 } from "@/lib/tts-settings";
@@ -113,6 +115,7 @@ interface Props {
   profileBase: Record<string, unknown>;
   globalOverrides: Record<string, unknown>;
   ttsDefaults: TtsRuntimeDefaults;
+  imageDefaults: ImageRuntimeDefaults;
 }
 
 interface CropEditorState {
@@ -208,6 +211,23 @@ function defaultModelForProvider(provider: string): string {
   return IMAGE_PROVIDER_OPTIONS.find((option) => option.value === provider)?.defaultModel ?? "";
 }
 
+function defaultGenerationProvider(providers: string[]): string {
+  return providers.find((provider) => IMAGE_PROVIDER_OPTIONS.some((option) => option.value === provider)) ?? "pollinations";
+}
+
+function imageModelForProvider(provider: string, settings: ImageRuntimeDefaults): string {
+  if (provider === "pollinations") {
+    return settings.pollinationsModel;
+  }
+  if (provider === "cloudflare_workers") {
+    return settings.cloudflareModel;
+  }
+  if (provider === "huggingface") {
+    return settings.huggingfaceModel;
+  }
+  return defaultModelForProvider(provider);
+}
+
 function sourceText(value: string | undefined | null): string | undefined {
   const trimmed = value?.trim();
   return trimmed || undefined;
@@ -298,7 +318,7 @@ function clampOffset(offset: Point, size: Size, scale: number): Point {
   };
 }
 
-export function ProductionReviewClient({ initial, profileBase, globalOverrides, ttsDefaults }: Props) {
+export function ProductionReviewClient({ initial, profileBase, globalOverrides, ttsDefaults, imageDefaults }: Props) {
   const [data, setData] = useState<ProductionReviewPayload>(initial);
   const [topicIndex, setTopicIndex] = useState<number>(initial.videos[0]?.topic_index ?? 0);
   const [saving, setSaving] = useState(false);
@@ -330,6 +350,34 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   const [showConfig, setShowConfig] = useState(false);
   const inheritedProfile = useMemo(() => deepMerge(profileBase, globalOverrides), [profileBase, globalOverrides]);
   const projectConfigOverrideCount = countOverrideLeaves(projectOverrides) + countRuntimeOverrideLeaves(runtimeOverrides);
+  const effectiveImageRuntime = useMemo(
+    () => effectiveImageSettings(imageDefaults, runtimeOverrides),
+    [imageDefaults, runtimeOverrides],
+  );
+
+  const updateRuntimeTts = (next: ProjectRuntimeOverrides) => {
+    setRuntimeOverrides((prev) => {
+      const merged: ProjectRuntimeOverrides = { ...prev };
+      if (next.tts) {
+        merged.tts = next.tts;
+      } else {
+        delete merged.tts;
+      }
+      return merged;
+    });
+  };
+
+  const updateRuntimeImage = (next: ProjectRuntimeOverrides) => {
+    setRuntimeOverrides((prev) => {
+      const merged: ProjectRuntimeOverrides = { ...prev };
+      if (next.image) {
+        merged.image = next.image;
+      } else {
+        delete merged.image;
+      }
+      return merged;
+    });
+  };
 
   const selectedVideo = useMemo(() => {
     return data.videos.find((video) => video.topic_index === topicIndex) ?? data.videos[0] ?? null;
@@ -415,8 +463,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     const promptSource = firstAvailablePromptSource(sources, preferredSources);
     const savedProvider = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_provider") : null;
     const savedModel = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_model") : null;
-    const provider = savedProvider || "pollinations";
-    const model = savedModel !== null ? savedModel : defaultModelForProvider(provider);
+    const provider = savedProvider || defaultGenerationProvider(effectiveImageRuntime.providers);
+    const model = savedModel !== null ? savedModel : imageModelForProvider(provider, effectiveImageRuntime);
 
     setGenerateEditor({
       itemId,
@@ -1022,7 +1070,9 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
         setIsDirty(false);
         setDirtyStages(new Set());
       }
-      saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
+      if (runtimeOverrides.tts) {
+        saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
+      }
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/regenerate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1326,6 +1376,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
           onClose={() => setGenerateEditor(null)}
           onGeneratePreview={generatePreviewImage}
           onInsert={insertGeneratedImage}
+          imageDefaults={effectiveImageRuntime}
         />
       ) : null}
 
@@ -1338,7 +1389,10 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
           onChange={setProjectOverrides}
           ttsValue={runtimeOverrides}
           ttsDefaults={ttsDefaults}
-          onTtsChange={setRuntimeOverrides}
+          onTtsChange={updateRuntimeTts}
+          imageValue={runtimeOverrides}
+          imageDefaults={imageDefaults}
+          onImageChange={updateRuntimeImage}
           ttsDisabled={saving || regenerating}
           onClose={() => setShowConfig(false)}
         />
@@ -1761,9 +1815,10 @@ interface ImageGenerateModalProps {
   onClose: () => void;
   onGeneratePreview: () => Promise<void>;
   onInsert: () => Promise<void>;
+  imageDefaults: ImageRuntimeDefaults;
 }
 
-function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview, onInsert }: ImageGenerateModalProps) {
+function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview, onInsert, imageDefaults }: ImageGenerateModalProps) {
   const previewSrc = editor.previewImageBase64
     ? `data:${editor.previewContentType ?? "image/jpeg"};base64,${editor.previewImageBase64}`
     : "";
@@ -1796,7 +1851,7 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
               disabled={busy}
               onChange={(event) => {
                 const provider = event.target.value;
-                const model = defaultModelForProvider(provider);
+                const model = imageModelForProvider(provider, imageDefaults);
                 if (typeof window !== "undefined") {
                   window.localStorage.setItem("kb_last_image_provider", provider);
                   window.localStorage.setItem("kb_last_image_model", model);

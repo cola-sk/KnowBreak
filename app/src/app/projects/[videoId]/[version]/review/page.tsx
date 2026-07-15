@@ -7,7 +7,7 @@ import { StageHeader } from "@/components/stage-header";
 import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
 import { getProductionReviewData, getProjectArtifactOverview } from "@/lib/review-store";
 import { listStartJobs } from "@/lib/start-store";
-import { readTtsRuntimeDefaults } from "@/lib/tts-settings-server";
+import { readImageRuntimeDefaults, readTtsRuntimeDefaults } from "@/lib/tts-settings-server";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
@@ -22,11 +22,12 @@ async function findTaskHref(videoId: string, version: string): Promise<string | 
 export default async function ProductionReviewPage({ params }: Props) {
   const { videoId, version } = await params;
   try {
-    const [initial, profileBase, globalOverrides, ttsDefaults] = await Promise.all([
+    const [initial, profileBase, globalOverrides, ttsDefaults, imageDefaults] = await Promise.all([
       getProductionReviewData(videoId, version) as Promise<ProductionReviewPayload>,
       readProfileBase(),
       readProfileOverrides(),
       readTtsRuntimeDefaults(),
+      readImageRuntimeDefaults(),
     ]);
     const reviewStatuses = Object.fromEntries(
       Object.entries(initial.reviews).map(([stage, review]) => [stage, review?.status]),
@@ -46,6 +47,7 @@ export default async function ProductionReviewPage({ params }: Props) {
           profileBase={profileBase}
           globalOverrides={globalOverrides}
           ttsDefaults={ttsDefaults}
+          imageDefaults={imageDefaults}
         />
       </main>
     );

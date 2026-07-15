@@ -2,6 +2,7 @@ import { ImageReviewClient, type ImageReviewPayload } from "@/components/image-r
 import { ReviewUnavailable } from "@/components/review-unavailable";
 import { StageHeader } from "@/components/stage-header";
 import { getProjectArtifactOverview, getReviewStatuses, getStageData } from "@/lib/review-store";
+import { readImageRuntimeDefaults } from "@/lib/tts-settings-server";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
@@ -15,9 +16,10 @@ export default async function ImageReviewPage({ params }: Props) {
       version,
     "images",
     )) as ImageReviewPayload;
-    const [scriptData, storyboardData] = await Promise.all([
+    const [scriptData, storyboardData, imageDefaults] = await Promise.all([
       getStageData(videoId, version, "script").catch(() => null),
       getStageData(videoId, version, "storyboard").catch(() => null),
+      readImageRuntimeDefaults(),
     ]);
     const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     const title = initial.artifact[0]?.title;
@@ -43,6 +45,7 @@ export default async function ImageReviewPage({ params }: Props) {
             script: scriptData?.artifact as never,
             storyboard: storyboardData?.artifact as never,
           }}
+          imageDefaults={imageDefaults}
         />
       </main>
     );

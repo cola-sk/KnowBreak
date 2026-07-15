@@ -1,17 +1,18 @@
 import { StartForm } from "@/components/start-form";
 import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
 import { listWorkflows, resolveOutDir } from "@/lib/review-store";
-import { readTtsRuntimeDefaults } from "@/lib/tts-settings-server";
+import { readImageRuntimeDefaults, readTtsRuntimeDefaults } from "@/lib/tts-settings-server";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [workflows, outDir, profileBase, globalOverrides, ttsDefaults] = await Promise.all([
+  const [workflows, outDir, profileBase, globalOverrides, ttsDefaults, imageDefaults] = await Promise.all([
     listWorkflows(),
     resolveOutDir(),
     readProfileBase(),
     readProfileOverrides(),
     readTtsRuntimeDefaults(),
+    readImageRuntimeDefaults(),
   ]);
 
   return (
@@ -29,6 +30,7 @@ export default async function HomePage() {
         profileBase={profileBase}
         globalOverrides={globalOverrides}
         ttsDefaults={ttsDefaults}
+        imageDefaults={imageDefaults}
       />
 
       <div className="footer-info">

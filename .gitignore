@@ -34,5 +34,6 @@ inputs/
 .coverage
 htmlcov/
 cookies.txt
+profiles/*override*.json
 *.tsbuildinfo
 .playwright-mcp/

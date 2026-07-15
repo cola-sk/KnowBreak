@@ -4,6 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { readImageFileFromClipboard } from "@/lib/clipboard-image";
 import { buildContextualImagePrompt } from "@/lib/image-generation-prompt";
+import {
+  FALLBACK_IMAGE_RUNTIME_DEFAULTS,
+  type ImageRuntimeDefaults,
+} from "@/lib/tts-settings";
 import type { ReviewFile, ReviewItemStatus } from "@/lib/types";
 
 interface ImageEntry {
@@ -75,6 +79,7 @@ interface Props {
   initial: ImageReviewPayload;
   context?: ImageReviewContext;
   readOnly?: boolean;
+  imageDefaults?: ImageRuntimeDefaults;
 }
 
 interface CropEditorState {
@@ -165,6 +170,23 @@ function defaultModelForProvider(provider: string): string {
   return IMAGE_PROVIDER_OPTIONS.find((option) => option.value === provider)?.defaultModel ?? "";
 }
 
+function defaultGenerationProvider(providers: string[]): string {
+  return providers.find((provider) => IMAGE_PROVIDER_OPTIONS.some((option) => option.value === provider)) ?? "pollinations";
+}
+
+function imageModelForProvider(provider: string, settings: ImageRuntimeDefaults): string {
+  if (provider === "pollinations") {
+    return settings.pollinationsModel;
+  }
+  if (provider === "cloudflare_workers") {
+    return settings.cloudflareModel;
+  }
+  if (provider === "huggingface") {
+    return settings.huggingfaceModel;
+  }
+  return defaultModelForProvider(provider);
+}
+
 function statusClass(status: string): string {
   if (status === "approved") {
     return "badge approved";
@@ -207,7 +229,14 @@ function clampOffset(offset: Point, size: Size, scale: number): Point {
   };
 }
 
-export function ImageReviewClient({ videoId, version, initial, context, readOnly = false }: Props) {
+export function ImageReviewClient({
+  videoId,
+  version,
+  initial,
+  context,
+  readOnly = false,
+  imageDefaults = FALLBACK_IMAGE_RUNTIME_DEFAULTS,
+}: Props) {
   const [data, setData] = useState<ImageReviewPayload>(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -264,8 +293,8 @@ export function ImageReviewClient({ videoId, version, initial, context, readOnly
     const initialPrompt = sources[defaultSource] || "";
     const savedProvider = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_provider") : null;
     const savedModel = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_model") : null;
-    const provider = savedProvider || "pollinations";
-    const model = savedModel !== null ? savedModel : defaultModelForProvider(provider);
+    const provider = savedProvider || defaultGenerationProvider(imageDefaults.providers);
+    const model = savedModel !== null ? savedModel : imageModelForProvider(provider, imageDefaults);
 
     setGenerateEditor({
       itemId,
@@ -671,6 +700,7 @@ export function ImageReviewClient({ videoId, version, initial, context, readOnly
           onClose={() => setGenerateEditor(null)}
           onGeneratePreview={generatePreviewImage}
           onInsert={insertGeneratedImage}
+          imageDefaults={imageDefaults}
         />
       ) : null}
     </div>
@@ -869,9 +899,10 @@ interface ImageGenerateModalProps {
   onClose: () => void;
   onGeneratePreview: () => Promise<void>;
   onInsert: () => Promise<void>;
+  imageDefaults: ImageRuntimeDefaults;
 }
 
-function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview, onInsert }: ImageGenerateModalProps) {
+function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview, onInsert, imageDefaults }: ImageGenerateModalProps) {
   const previewSrc = editor.previewImageBase64
     ? `data:${editor.previewContentType ?? "image/jpeg"};base64,${editor.previewImageBase64}`
     : "";
@@ -904,7 +935,7 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
               disabled={busy}
               onChange={(event) => {
                 const provider = event.target.value;
-                const model = defaultModelForProvider(provider);
+                const model = imageModelForProvider(provider, imageDefaults);
                 if (typeof window !== "undefined") {
                   window.localStorage.setItem("kb_last_image_provider", provider);
                   window.localStorage.setItem("kb_last_image_model", model);

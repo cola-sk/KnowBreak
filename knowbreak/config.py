@@ -108,7 +108,7 @@ def _optional_env(key: str) -> str | None:
     return v if v else None
 
 
-def _project_runtime_tts_overrides() -> dict:
+def _project_runtime_overrides_section(section: str) -> dict:
     raw = os.getenv("KB_PROJECT_RUNTIME_OVERRIDES")
     if not raw:
         return {}
@@ -118,11 +118,11 @@ def _project_runtime_tts_overrides() -> dict:
         return {}
     if not isinstance(parsed, dict):
         return {}
-    tts = parsed.get("tts")
-    return tts if isinstance(tts, dict) else {}
+    value = parsed.get(section)
+    return value if isinstance(value, dict) else {}
 
 
-def _global_runtime_tts_overrides(project_root: Path, profile_name: str) -> dict:
+def _global_runtime_overrides_section(project_root: Path, profile_name: str, section: str) -> dict:
     overrides_path = project_root / "profiles" / "runtime_overrides.json"
     if not overrides_path.is_file():
         return {}
@@ -132,17 +132,42 @@ def _global_runtime_tts_overrides(project_root: Path, profile_name: str) -> dict
         return {}
     if not isinstance(parsed, dict):
         return {}
-    tts = parsed.get("tts")
-    return tts if isinstance(tts, dict) else {}
+    value = parsed.get(section)
+    return value if isinstance(value, dict) else {}
 
 
-def _merged_runtime_tts_overrides(project_root: Path, profile_name: str) -> dict:
-    merged = dict(_global_runtime_tts_overrides(project_root, profile_name))
-    merged.update(_project_runtime_tts_overrides())
+def _merged_runtime_overrides_section(project_root: Path, profile_name: str, section: str) -> dict:
+    merged = dict(_global_runtime_overrides_section(project_root, profile_name, section))
+    merged.update(_project_runtime_overrides_section(section))
     return merged
 
 
 def _runtime_tts_env(
+    overrides: dict,
+    field_names: tuple[str, ...],
+    env_key: str,
+    default: str | None = None,
+) -> str:
+    for field_name in field_names:
+        value = overrides.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return _env(env_key, default)
+
+
+def _runtime_optional_env(
+    overrides: dict,
+    field_names: tuple[str, ...],
+    env_key: str,
+) -> str | None:
+    for field_name in field_names:
+        value = overrides.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return _optional_env(env_key)
+
+
+def _runtime_env(
     overrides: dict,
     field_names: tuple[str, ...],
     env_key: str,
@@ -172,9 +197,17 @@ def _resolve_optional_path(v: str | None) -> Path | None:
     return p
 
 
-def _image_providers() -> tuple[str, ...]:
-    raw = _env("KB_IMAGE_PROVIDERS", "pexels,pixabay")
-    providers = tuple(p.strip().lower() for p in raw.split(",") if p.strip())
+def _image_providers(runtime_image: dict) -> tuple[str, ...]:
+    raw_override = runtime_image.get("providers")
+    if isinstance(raw_override, list):
+        raw = ",".join(str(item) for item in raw_override)
+    elif isinstance(raw_override, str):
+        raw = raw_override
+    elif isinstance(runtime_image.get("provider"), str):
+        raw = runtime_image["provider"]
+    else:
+        raw = _env("KB_IMAGE_PROVIDERS", "pexels,pixabay")
+    providers = tuple(p.strip().lower().replace("-", "_") for p in raw.split(",") if p.strip())
     return providers or ("pexels", "pixabay")
 
 
@@ -200,7 +233,8 @@ def load_config() -> Config:
     load_dotenv(override=True)
     project_root = Path(__file__).resolve().parent.parent
     profile_name = _env("KB_STYLE_PROFILE", "default")
-    runtime_tts = _merged_runtime_tts_overrides(project_root, profile_name)
+    runtime_tts = _merged_runtime_overrides_section(project_root, profile_name, "tts")
+    runtime_image = _merged_runtime_overrides_section(project_root, profile_name, "image")
     profile = load_style_profile(
         project_root,
         profile_name,
@@ -288,28 +322,38 @@ def load_config() -> Config:
         project_root=project_root,
         cookies_browser=_optional_env("KB_COOKIES_BROWSER"),
         cookies_file=_resolve_optional_path(_optional_env("KB_COOKIES_FILE")),
-        image_providers=_image_providers(),
+        image_providers=_image_providers(runtime_image),
         pexels_api_key=_optional_env("PEXELS_API_KEY") or _optional_env("KB_PEXELS_API_KEY"),
         pixabay_api_key=_optional_env("PIXABAY_API_KEY") or _optional_env("KB_PIXABAY_API_KEY"),
         pollinations_api_key=_optional_env("POLLINATIONS_API_KEY")
         or _optional_env("KB_POLLINATIONS_API_KEY"),
-        pollinations_image_model=_optional_env("KB_POLLINATIONS_IMAGE_MODEL"),
+        pollinations_image_model=_runtime_optional_env(
+            runtime_image,
+            ("pollinationsModel", "pollinations_model"),
+            "KB_POLLINATIONS_IMAGE_MODEL",
+        ),
         cloudflare_account_id=_optional_env("KB_CLOUDFLARE_ACCOUNT_ID")
         or _optional_env("CLOUDFLARE_ACCOUNT_ID"),
         cloudflare_api_token=_optional_env("KB_CLOUDFLARE_API_TOKEN")
         or _optional_env("CLOUDFLARE_API_TOKEN"),
-        cloudflare_image_model=_env(
+        cloudflare_image_model=_runtime_env(
+            runtime_image,
+            ("cloudflareModel", "cloudflare_model"),
             "KB_CLOUDFLARE_IMAGE_MODEL",
             "@cf/black-forest-labs/flux-1-schnell",
         ),
         huggingface_api_token=_optional_env("KB_HUGGINGFACE_API_TOKEN")
         or _optional_env("HUGGINGFACE_API_TOKEN")
         or _optional_env("HF_TOKEN"),
-        huggingface_image_model=_env(
+        huggingface_image_model=_runtime_env(
+            runtime_image,
+            ("huggingfaceModel", "huggingface_model"),
             "KB_HUGGINGFACE_IMAGE_MODEL",
             "black-forest-labs/FLUX.1-schnell",
         ),
-        huggingface_image_base_url=_env(
+        huggingface_image_base_url=_runtime_env(
+            runtime_image,
+            ("huggingfaceBaseUrl", "huggingface_base_url"),
             "KB_HUGGINGFACE_IMAGE_BASE_URL",
             "https://router.huggingface.co/hf-inference/models",
         ),

@@ -5,9 +5,12 @@ import path from "node:path";
 import { buildRuntimeEnv } from "@/lib/runtime-env";
 import { resolveProjectRoot } from "@/lib/review-store";
 import {
+  effectiveImageSettings,
   effectiveTtsSettings,
+  normalizeImageProviders,
   normalizeTtsSettings,
   normalizeProvider,
+  type ImageRuntimeDefaults,
   type ProjectRuntimeOverrides,
   type TtsProvider,
   type TtsRuntimeDefaults,
@@ -83,4 +86,31 @@ export async function readTtsRuntimeBaseDefaults(): Promise<TtsRuntimeDefaults> 
 
 export async function readTtsRuntimeDefaults(): Promise<TtsRuntimeDefaults> {
   return effectiveTtsSettings(await readTtsRuntimeBaseDefaults(), await readGlobalRuntimeOverrides());
+}
+
+export async function readImageRuntimeBaseDefaults(): Promise<ImageRuntimeDefaults> {
+  const env = await buildRuntimeEnv(resolveProjectRoot());
+  return {
+    providers: normalizeImageProviders(envValue(env, "KB_IMAGE_PROVIDERS", "pexels,pixabay")),
+    pollinationsModel: envValue(env, "KB_POLLINATIONS_IMAGE_MODEL", ""),
+    cloudflareModel: envValue(
+      env,
+      "KB_CLOUDFLARE_IMAGE_MODEL",
+      "@cf/black-forest-labs/flux-1-schnell",
+    ),
+    huggingfaceModel: envValue(
+      env,
+      "KB_HUGGINGFACE_IMAGE_MODEL",
+      "black-forest-labs/FLUX.1-schnell",
+    ),
+    huggingfaceBaseUrl: envValue(
+      env,
+      "KB_HUGGINGFACE_IMAGE_BASE_URL",
+      "https://router.huggingface.co/hf-inference/models",
+    ),
+  };
+}
+
+export async function readImageRuntimeDefaults(): Promise<ImageRuntimeDefaults> {
+  return effectiveImageSettings(await readImageRuntimeBaseDefaults(), await readGlobalRuntimeOverrides());
 }

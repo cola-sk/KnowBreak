@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { type PointerEvent, useMemo, useRef, useState } from "react";
 
-import { TtsSettingsEditor } from "@/components/tts-settings-panel";
+import { ImageSettingsEditor, TtsSettingsEditor } from "@/components/tts-settings-panel";
 import { PROFILE_DEFAULTS, type ColorTriple, type FieldSpec } from "@/lib/profile-defaults";
 import {
   countRuntimeOverrideLeaves,
   effectiveTtsSettings,
   saveTtsHistoryItem,
+  type ImageRuntimeDefaults,
   type ProjectRuntimeOverrides,
   type TtsRuntimeDefaults,
 } from "@/lib/tts-settings";
@@ -18,6 +19,7 @@ interface Props {
   base: Record<string, unknown>;
   ttsInitial?: ProjectRuntimeOverrides;
   ttsDefaults?: TtsRuntimeDefaults;
+  imageDefaults?: ImageRuntimeDefaults;
 }
 
 export function getNested(state: Record<string, unknown>, key: string): unknown {
@@ -240,9 +242,9 @@ function defaultValueForField(spec: FieldSpec, baseValue: unknown): unknown {
   return spec.default;
 }
 
-type ConfigTab = "cover" | "content" | "tts";
+type ConfigTab = "cover" | "content" | "tts" | "image";
 
-export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults }: Props) {
+export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults, imageDefaults }: Props) {
   const [state, setState] = useState<Record<string, unknown>>(initial);
   const [ttsState, setTtsState] = useState<ProjectRuntimeOverrides>(ttsInitial ?? {});
   const [activeTab, setActiveTab] = useState<ConfigTab>("cover");
@@ -251,6 +253,31 @@ export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults }: Props)
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const showTtsTab = Boolean(ttsDefaults);
+  const showImageTab = Boolean(imageDefaults);
+
+  const updateRuntimeTts = (next: ProjectRuntimeOverrides) => {
+    setTtsState((prev) => {
+      const merged: ProjectRuntimeOverrides = { ...prev };
+      if (next.tts) {
+        merged.tts = next.tts;
+      } else {
+        delete merged.tts;
+      }
+      return merged;
+    });
+  };
+
+  const updateRuntimeImage = (next: ProjectRuntimeOverrides) => {
+    setTtsState((prev) => {
+      const merged: ProjectRuntimeOverrides = { ...prev };
+      if (next.image) {
+        merged.image = next.image;
+      } else {
+        delete merged.image;
+      }
+      return merged;
+    });
+  };
 
   const save = async () => {
     setSaving(true);
@@ -267,7 +294,7 @@ export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults }: Props)
         throw new Error(profilePayload.error ?? "保存失败");
       }
 
-      if (ttsDefaults) {
+      if (ttsDefaults || imageDefaults) {
         const runtimeResponse = await fetch("/api/runtime-overrides", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -275,10 +302,12 @@ export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults }: Props)
         });
         const runtimePayload = (await runtimeResponse.json()) as { ok?: boolean; error?: string };
         if (!runtimeResponse.ok || !runtimePayload.ok) {
-          throw new Error(runtimePayload.error ?? "TTS 全局配置保存失败");
+          throw new Error(runtimePayload.error ?? "运行时全局配置保存失败");
         }
         if (countRuntimeOverrideLeaves(ttsState) > 0) {
-          saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, ttsState));
+          if (ttsDefaults && ttsState.tts) {
+            saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, ttsState));
+          }
         }
       }
       setMessage("已写入全局配置，新跑的流水线会生效。");
@@ -300,6 +329,9 @@ export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults }: Props)
         <button type="button" className={activeTab === "content" ? "active" : ""} onClick={() => setActiveTab("content")}>内容</button>
         {showTtsTab ? (
           <button type="button" className={activeTab === "tts" ? "active" : ""} onClick={() => setActiveTab("tts")}>TTS</button>
+        ) : null}
+        {showImageTab ? (
+          <button type="button" className={activeTab === "image" ? "active" : ""} onClick={() => setActiveTab("image")}>图片</button>
         ) : null}
       </div>
 
@@ -366,9 +398,22 @@ export function ProfileEditor({ initial, base, ttsInitial, ttsDefaults }: Props)
           <TtsSettingsEditor
             value={ttsState}
             defaults={ttsDefaults}
-            onChange={setTtsState}
+            onChange={updateRuntimeTts}
             disabled={saving}
             clearLabel="清除 TTS 修改"
+            defaultLabel="默认配置"
+          />
+        </section>
+      ) : null}
+
+      {activeTab === "image" && imageDefaults ? (
+        <section className="panel param-group-panel">
+          <ImageSettingsEditor
+            value={ttsState}
+            defaults={imageDefaults}
+            onChange={updateRuntimeImage}
+            disabled={saving}
+            clearLabel="清除图片修改"
             defaultLabel="默认配置"
           />
         </section>
@@ -865,6 +910,9 @@ export function ProjectProfileConfigModal({
   ttsValue,
   ttsDefaults,
   onTtsChange,
+  imageValue,
+  imageDefaults,
+  onImageChange,
   ttsDisabled = false,
   onClose,
 }: {
@@ -876,14 +924,18 @@ export function ProjectProfileConfigModal({
   ttsValue?: ProjectRuntimeOverrides;
   ttsDefaults?: TtsRuntimeDefaults;
   onTtsChange?: (value: ProjectRuntimeOverrides) => void;
+  imageValue?: ProjectRuntimeOverrides;
+  imageDefaults?: ImageRuntimeDefaults;
+  onImageChange?: (value: ProjectRuntimeOverrides) => void;
   ttsDisabled?: boolean;
   onClose: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<ConfigTab>("cover");
   const effective = useMemo(() => deepMerge(base, value), [base, value]);
   const showTtsTab = Boolean(ttsDefaults && ttsValue && onTtsChange);
+  const showImageTab = Boolean(imageDefaults && imageValue && onImageChange);
   const profileOverrideCount = countOverrideLeaves(value);
-  const runtimeOverrideCount = countRuntimeOverrideLeaves(ttsValue);
+  const runtimeOverrideCount = countRuntimeOverrideLeaves(ttsValue ?? imageValue);
   const totalOverrideCount = profileOverrideCount + runtimeOverrideCount;
   const updateOne = (key: string, nextValue: unknown) => {
     if (nextValue === undefined || nextValue === "") {
@@ -916,6 +968,7 @@ export function ProjectProfileConfigModal({
   const clearAllOverrides = () => {
     onChange({});
     onTtsChange?.({});
+    onImageChange?.({});
   };
 
   return (
@@ -935,6 +988,9 @@ export function ProjectProfileConfigModal({
             <button type="button" className={activeTab === "content" ? "active" : ""} onClick={() => setActiveTab("content")}>内容</button>
             {showTtsTab ? (
               <button type="button" className={activeTab === "tts" ? "active" : ""} onClick={() => setActiveTab("tts")}>TTS</button>
+            ) : null}
+            {showImageTab ? (
+              <button type="button" className={activeTab === "image" ? "active" : ""} onClick={() => setActiveTab("image")}>图片</button>
             ) : null}
           </div>
 
@@ -1019,6 +1075,19 @@ export function ProjectProfileConfigModal({
                 onChange={onTtsChange}
                 disabled={ttsDisabled}
                 clearLabel="清除 TTS 修改"
+                defaultLabel="当前默认"
+              />
+            </section>
+          ) : null}
+
+          {activeTab === "image" && showImageTab && imageDefaults && imageValue && onImageChange ? (
+            <section className="panel param-group-panel">
+              <ImageSettingsEditor
+                value={imageValue}
+                defaults={imageDefaults}
+                onChange={onImageChange}
+                disabled={ttsDisabled}
+                clearLabel="清除图片修改"
                 defaultLabel="当前默认"
               />
             </section>
