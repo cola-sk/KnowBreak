@@ -4,13 +4,13 @@ import { listProjectSummaries } from "@/lib/review-store";
 type FilterMode = "open" | "all" | "approved";
 
 function normalizeFilter(raw: string | undefined): FilterMode {
-  if (raw === "all") {
-    return "all";
+  if (raw === "open") {
+    return "open";
   }
   if (raw === "approved") {
     return "approved";
   }
-  return "open";
+  return "all";
 }
 
 export default async function ProjectsPage(props: {

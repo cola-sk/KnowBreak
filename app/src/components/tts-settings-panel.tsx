@@ -40,13 +40,14 @@ interface ImageSettingsEditorProps {
   defaultLabel?: string;
 }
 
-export function overridesFromSettings(settings: TtsRuntimeDefaults): ProjectRuntimeOverrides {
+export function overridesFromSettings(settings: TtsRuntimeDefaults, speed?: number): ProjectRuntimeOverrides {
   const normalized = normalizeTtsSettings(settings);
   return {
     tts: {
       provider: normalized.provider,
       model: normalized.model,
       speaker: normalized.speaker,
+      speed,
     },
   };
 }
@@ -138,7 +139,7 @@ export function TtsSettingsEditor({
 
   const commitSettings = (settings: TtsRuntimeDefaults, saveHistory = false) => {
     const normalized = normalizeTtsSettings(settings);
-    onChange(overridesFromSettings(normalized));
+    onChange(overridesFromSettings(normalized, value.tts?.speed));
     if (saveHistory) {
       saveTtsHistoryItem(normalized);
       setHistory(readHistory());
@@ -211,6 +212,28 @@ export function TtsSettingsEditor({
             value={effective.speaker}
             onChange={(event) => commitSettings({ ...effective, speaker: event.target.value })}
           />
+        </div>
+
+        <div>
+          <label>语速倍率</label>
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <input
+              type="number"
+              disabled={disabled}
+              step={0.05}
+              min={0.5}
+              max={2}
+              value={value.tts?.speed ?? 1}
+              onChange={(event) => {
+                const num = parseFloat(event.target.value);
+                if (!isNaN(num) && num >= 0.5 && num <= 2) {
+                  onChange({ ...value, tts: { ...value.tts, provider: effective.provider, model: effective.model, speaker: effective.speaker, speed: num } });
+                }
+              }}
+              style={{ width: 80 }}
+            />
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>1.0 = 正常，1.15 = 加快 15%</span>
+          </div>
         </div>
       </div>
 

@@ -60,6 +60,12 @@ class RewriteProfile(BaseModel):
     spoken_chars_per_second: float = 5.0
 
 
+class TTSProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speed: float = 1.0  # 口播语速倍率，1.0 = 正常，1.15 = 加快 15%
+
+
 class ComposeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -112,6 +118,7 @@ class StyleProfile(BaseModel):
     intro: IntroProfile = Field(default_factory=IntroProfile)
     topics: TopicsProfile = Field(default_factory=TopicsProfile)
     rewrite: RewriteProfile = Field(default_factory=RewriteProfile)
+    tts: TTSProfile = Field(default_factory=TTSProfile)
     compose: ComposeProfile = Field(default_factory=ComposeProfile)
 
     @property

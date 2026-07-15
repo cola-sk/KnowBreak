@@ -148,6 +148,7 @@ const CONTENT_PARAM_SECTIONS = [
       "rewrite.target_duration_min",
       "rewrite.target_duration_max",
       "rewrite.spoken_chars_per_second",
+      "tts.speed",
     ]),
   },
   {

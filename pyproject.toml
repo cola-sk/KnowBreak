@@ -1,7 +1,7 @@
 [project]
 name = "knowbreak"
 version = "0.1.0"
-description = "知点拆解局 — 知识二创短视频生产流水线"
+description = "知点拆解局 — 知识短视频生产流水线"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

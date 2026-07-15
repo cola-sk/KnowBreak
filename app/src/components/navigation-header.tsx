@@ -25,11 +25,11 @@ export function NavigationHeader() {
           <Link href="/" className={`nav-link ${isHome ? "active" : ""}`}>
             新建流程
           </Link>
-          <Link href="/tasks" className={`nav-link ${isTasks ? "active" : ""}`}>
-            任务中心
-          </Link>
           <Link href="/projects" className={`nav-link ${isProjects ? "active" : ""}`}>
             项目列表
+          </Link>
+          <Link href="/tasks" className={`nav-link ${isTasks ? "active" : ""}`}>
+            任务中心
           </Link>
           <Link href="/workflows" className={`nav-link ${isWorkflows ? "active" : ""}`}>
             工作流配置

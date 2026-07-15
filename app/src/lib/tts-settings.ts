@@ -5,6 +5,7 @@ export interface TtsRuntimeOverrides {
   provider?: string;
   model?: string;
   speaker?: string;
+  speed?: number;
   // Backward compatibility for existing project_runtime_overrides.json files.
   volcModel?: string;
   volcSpeaker?: string;
@@ -206,6 +207,9 @@ export function countRuntimeOverrideLeaves(value: ProjectRuntimeOverrides | unde
       const item = value.tts?.[key as keyof TtsRuntimeOverrides];
       return typeof item === "string" && item.trim();
     }).length;
+    if (typeof value.tts?.speed === "number" && value.tts.speed !== 1) {
+      count += 1;
+    }
   }
   if (value?.image) {
     if (Array.isArray(value.image.providers) && value.image.providers.length > 0) {
@@ -232,6 +236,7 @@ export function compactRuntimeOverrides(value: ProjectRuntimeOverrides): Project
       provider: effective.provider,
       model: effective.model,
       speaker: effective.speaker,
+      speed: value.tts.speed,
     };
   }
   if (value.image) {
@@ -256,6 +261,10 @@ export function runtimeOverridesToEnv(value: ProjectRuntimeOverrides | undefined
   if (value.tts) {
     const effective = effectiveTtsSettings(FALLBACK_TTS_RUNTIME_DEFAULTS, value);
     env.KB_TTS_PROVIDER = effective.provider;
+
+    if (value.tts.speed && value.tts.speed !== 1) {
+      env.KB_TTS_SPEED = String(value.tts.speed);
+    }
 
     if (effective.provider === "volcengine") {
       env.KB_VOLC_TTS_MODEL = effective.model;

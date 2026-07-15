@@ -36,6 +36,7 @@ export const PROFILE_DEFAULTS: FieldGroup[] = [
       { key: "rewrite.target_duration_min", label: "改写目标最短(秒)", kind: "int", default: 60 },
       { key: "rewrite.target_duration_max", label: "改写目标最长(秒)", kind: "int", default: 90 },
       { key: "rewrite.spoken_chars_per_second", label: "口播字/秒", kind: "float", default: 5.0 },
+      { key: "tts.speed", label: "TTS 语速倍率", kind: "float", default: 1.0, hint: "1.0=正常，1.15=加快15%" },
     ],
   },
   {

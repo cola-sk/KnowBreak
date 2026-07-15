@@ -25,6 +25,9 @@ target_duration_min = 60
 target_duration_max = 90
 spoken_chars_per_second = 5.0
 
+[tts]
+speed = 1.0
+
 [compose]
 brand = "知点拆解局"
 video_w = 1080

@@ -23,7 +23,7 @@ from .stages import topic_seed as topic_seed_stage
 from .stages import topics as topics_stage
 from .stages import tts as tts_stage
 
-app = typer.Typer(add_completion=False, help="知点拆解局 — 知识二创短视频生产流水线")
+app = typer.Typer(add_completion=False, help="知点拆解局 — 知识短视频生产流水线")
 console = Console()
 
 

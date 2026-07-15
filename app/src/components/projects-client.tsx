@@ -187,11 +187,11 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
         <div className="filter-group">
           <span className="filter-label">过滤视图</span>
           <div className="filter-options">
-            <Link className={`filter-option ${filter === "open" ? "active" : ""}`} href="/projects?filter=open">
-              仅待处理
-            </Link>
             <Link className={`filter-option ${filter === "all" ? "active" : ""}`} href="/projects?filter=all">
               全部项目
+            </Link>
+            <Link className={`filter-option ${filter === "open" ? "active" : ""}`} href="/projects?filter=open">
+              仅待处理
             </Link>
             <Link className={`filter-option ${filter === "approved" ? "active" : ""}`} href="/projects?filter=approved">
               仅已通过

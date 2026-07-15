@@ -23,6 +23,7 @@ def test_load_builtin_style_profile() -> None:
     assert profile.rewrite.target_duration_min == 60
     assert profile.rewrite.target_duration_max == 90
     assert profile.rewrite.spoken_chars_per_second == 5.0
+    assert profile.tts.speed == 1.0
     assert profile.compose.brand == "知点拆解局"
     assert profile.compose.video_w == 1080
 

@@ -218,7 +218,15 @@ def _float_env(key: str, default: float) -> float:
     return float(v)
 
 
-def _tts_speed() -> float:
+def _tts_speed(profile_speed: float = 1.0) -> float:
+    # 优先级：profile [tts].speed > .env KB_TTS_SPEED/KB_TTS_RATE > 1.0
+    if profile_speed != 1.0:
+        # profile 设了非默认值，优先使用；.env 可显式覆盖
+        raw_speed = os.getenv("KB_TTS_SPEED")
+        if raw_speed:
+            return float(raw_speed)
+        return profile_speed
+    # profile 没设（默认1.0），看 .env
     raw_speed = os.getenv("KB_TTS_SPEED")
     if raw_speed:
         return float(raw_speed)
@@ -284,7 +292,7 @@ def load_config() -> Config:
             voice=edge_voice,
             rate=_env("KB_TTS_RATE", "+0%"),
             volume=_env("KB_TTS_VOLUME", "+0%"),
-            speed=_tts_speed(),
+            speed=_tts_speed(profile.tts.speed),
             timeout=_float_env("KB_TTS_TIMEOUT", 60.0),
             openai_api_key=_optional_env("KB_OPENAI_TTS_API_KEY")
             or _optional_env("OPENAI_API_KEY"),
