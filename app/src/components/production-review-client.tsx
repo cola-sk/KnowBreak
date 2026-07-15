@@ -1848,7 +1848,7 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
 
   return (
     <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
-      <div className="image-lightbox image-generate-modal" style={{ maxWidth: 760 }}>
+      <div className="image-lightbox image-generate-modal" style={{ maxWidth: 1000 }}>
         <div className="image-lightbox-head">
           <div>
             <div className="section-title">AI 生成替换</div>
@@ -1859,128 +1859,142 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
           </button>
         </div>
         <div className="image-generate-body">
-          <div className="form-row">
-            <label className="form-label">provider</label>
-            <select
-              value={editor.provider}
-              disabled={busy}
-              onChange={(event) => {
-                const provider = event.target.value;
-                const model = imageModelForProvider(provider, imageDefaults);
-                if (typeof window !== "undefined") {
-                  window.localStorage.setItem("kb_last_image_provider", provider);
-                  window.localStorage.setItem("kb_last_image_model", model);
-                }
-                onChange({
-                  ...editor,
-                  provider,
-                  model,
-                  previewImageBase64: undefined,
-                  previewContentType: undefined,
-                  previewMetadata: undefined,
-                });
-              }}
-            >
-              {IMAGE_PROVIDER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-row">
-            <label className="form-label">model</label>
-            <input
-              value={editor.model}
-              disabled={busy}
-              placeholder="使用 provider 默认模型"
-              onChange={(event) => {
-                const model = event.target.value;
-                if (typeof window !== "undefined") {
-                  window.localStorage.setItem("kb_last_image_model", model);
-                }
-                onChange({
-                  ...editor,
-                  model,
-                  previewImageBase64: undefined,
-                  previewContentType: undefined,
-                  previewMetadata: undefined,
-                });
-              }}
-            />
-          </div>
-          <div className="form-row">
-            <label className="form-label">文案来源</label>
-            <select
-              value={editor.promptSource}
-              disabled={busy}
-              onChange={(event) => {
-                const promptSource = event.target.value as PromptSource;
-                onChange({
-                  ...editor,
-                  promptSource,
-                  prompt: editor.sources[promptSource] ?? editor.prompt,
-                  previewImageBase64: undefined,
-                  previewContentType: undefined,
-                  previewMetadata: undefined,
-                });
-              }}
-            >
-              {(Object.keys(PROMPT_SOURCE_LABELS) as PromptSource[]).map((source) => {
-                const value = editor.sources[source];
-                return (
-                  <option key={source} value={source} disabled={!value}>
-                    {PROMPT_SOURCE_LABELS[source]}
-                    {value ? "" : "（无）"}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={editor.useContextPrompt}
-              disabled={busy}
-              onChange={(event) => onChange({
-                ...editor,
-                useContextPrompt: event.target.checked,
-                previewImageBase64: undefined,
-                previewContentType: undefined,
-                previewMetadata: undefined,
-              })}
-            />
-            <span>上下文增强</span>
-          </label>
-          <div className="form-row">
-            <label className="form-label">prompt</label>
-            <textarea
-              value={editor.prompt}
-              disabled={busy}
-              rows={5}
-              onChange={(event) => onChange({
-                ...editor,
-                prompt: event.target.value,
-                previewImageBase64: undefined,
-                previewContentType: undefined,
-                previewMetadata: undefined,
-              })}
-            />
-          </div>
-          {editor.useContextPrompt ? (
-            <div className="form-row">
-              <label className="form-label">最终发送 prompt</label>
-              <textarea value={effectivePrompt} readOnly rows={7} />
-            </div>
-          ) : null}
-          <div className="image-generate-preview-slot">
-            {previewSrc ? (
-              <img src={previewSrc} alt="AI 生成预览" />
-            ) : (
-              <div className="empty">
-                {busy ? "生成中..." : "尚未生成预览，点击下方按钮开始"}
+          <div className="image-generate-form">
+            <div className="image-generate-form-row">
+              <div className="form-row">
+                <label className="form-label">provider</label>
+                <select
+                  value={editor.provider}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const provider = event.target.value;
+                    const model = imageModelForProvider(provider, imageDefaults);
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("kb_last_image_provider", provider);
+                      window.localStorage.setItem("kb_last_image_model", model);
+                    }
+                    onChange({
+                      ...editor,
+                      provider,
+                      model,
+                      previewImageBase64: undefined,
+                      previewContentType: undefined,
+                      previewMetadata: undefined,
+                    });
+                  }}
+                >
+                  {IMAGE_PROVIDER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
+              <div className="form-row">
+                <label className="form-label">model</label>
+                <input
+                  value={editor.model}
+                  disabled={busy}
+                  placeholder="使用 provider 默认模型"
+                  onChange={(event) => {
+                    const model = event.target.value;
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("kb_last_image_model", model);
+                    }
+                    onChange({
+                      ...editor,
+                      model,
+                      previewImageBase64: undefined,
+                      previewContentType: undefined,
+                      previewMetadata: undefined,
+                    });
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="image-generate-form-row">
+              <div className="form-row">
+                <label className="form-label">文案来源</label>
+                <select
+                  value={editor.promptSource}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const promptSource = event.target.value as PromptSource;
+                    onChange({
+                      ...editor,
+                      promptSource,
+                      prompt: editor.sources[promptSource] ?? editor.prompt,
+                      previewImageBase64: undefined,
+                      previewContentType: undefined,
+                      previewMetadata: undefined,
+                    });
+                  }}
+                >
+                  {(Object.keys(PROMPT_SOURCE_LABELS) as PromptSource[]).map((source) => {
+                    const value = editor.sources[source];
+                    return (
+                      <option key={source} value={source} disabled={!value}>
+                        {PROMPT_SOURCE_LABELS[source]}
+                        {value ? "" : "（无）"}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div className="form-row image-generate-checkbox-container">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={editor.useContextPrompt}
+                    disabled={busy}
+                    onChange={(event) => onChange({
+                      ...editor,
+                      useContextPrompt: event.target.checked,
+                      previewImageBase64: undefined,
+                      previewContentType: undefined,
+                      previewMetadata: undefined,
+                    })}
+                  />
+                  <span>上下文增强</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <label className="form-label">prompt</label>
+              <textarea
+                value={editor.prompt}
+                disabled={busy}
+                rows={4}
+                onChange={(event) => onChange({
+                  ...editor,
+                  prompt: event.target.value,
+                  previewImageBase64: undefined,
+                  previewContentType: undefined,
+                  previewMetadata: undefined,
+                })}
+              />
+            </div>
+
+            {editor.useContextPrompt ? (
+              <div className="form-row">
+                <label className="form-label">最终发送 prompt</label>
+                <textarea value={effectivePrompt} readOnly rows={5} />
+              </div>
+            ) : null}
+          </div>
+
+          <div className="image-generate-preview-container">
+            <div className="image-generate-preview-slot">
+              {previewSrc ? (
+                <img src={previewSrc} alt="AI 生成预览" />
+              ) : (
+                <div className={`empty ${busy ? "empty-loading" : ""}`}>
+                  {busy ? "生成中..." : "尚未生成预览，点击下方按钮开始"}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div className="image-generate-footer">
