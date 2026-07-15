@@ -6,12 +6,12 @@ Instructions and guidelines for AI coding agents working with the KnowBreak code
 
 ## 一、项目是什么 (Project Overview)
 
-**KnowBreak（知点拆解局）** 是一款基于 Python 的知识二创短视频生产流水线。它能够将长视频（讲座/科普/访谈）或手工给定的主题（Topic）提炼为原创的短视频选题、口播脚本、画面分镜、资源清单，并自动通过免版权图库、TTS 语音合成与视频渲染合成（Compose）生成完整的 MP4 短视频。
+**KnowBreak（知点拆解局）** 是一款基于 Python 的知识短视频生产流水线。它能够将长视频（讲座/科普/访谈）或手工给定的主题（Topic）提炼为原创的短视频选题、口播脚本、画面分镜、资源清单，并自动通过免版权图库、TTS 语音合成与视频渲染合成（Compose）生成完整的 MP4 短视频。
 
-*   **核心价值**：不搬运原视频，仅提取长视频中的知识点进行二次创作。
+*   **核心价值**：不搬运原视频，仅提取长视频中的知识点进行原创创作；也支持直接围绕主题生成短视频。
 *   **技术栈**：
     *   **核心后端**：Python (uv, Pydantic, Typer, Jinja2, Pytest, Pillow 等)
-    *   **Web 审核后台**：Next.js + TailwindCSS + React（提供二创流程的可视化与审核编辑界面）
+    *   **Web 审核后台**：Next.js + TailwindCSS + React（提供短视频生产流程的可视化与审核编辑界面）
     *   **多媒体处理**：yt-dlp, FFmpeg, faster-whisper
 
 ---

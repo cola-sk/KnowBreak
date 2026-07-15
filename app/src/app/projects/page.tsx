@@ -24,9 +24,9 @@ export default async function ProjectsPage(props: {
     <main className="shell">
       <div className="page-header">
         <div className="hero-eyebrow">Workspace</div>
-        <h1 className="hero-title">二创项目管理</h1>
+        <h1 className="hero-title">短视频项目管理</h1>
         <p className="hero-sub">
-          查看和过滤当前生成的二创视频版本，快速跳转至脚本、分镜或图片的修改审核界面。
+          查看和过滤当前生成的短视频版本，快速跳转至脚本、分镜或图片的修改审核界面。
         </p>
       </div>
       <ProjectsClient initialProjects={projects} filter={filter} />
