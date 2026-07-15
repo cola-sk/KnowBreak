@@ -35,3 +35,4 @@ inputs/
 htmlcov/
 cookies.txt
 *.tsbuildinfo
+.playwright-mcp/
