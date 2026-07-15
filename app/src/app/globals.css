@@ -3004,7 +3004,7 @@ a.tab.active {
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: 1.25fr 1fr;
+  grid-template-columns: 1fr 270px;
   gap: 24px;
   align-items: start;
   padding-right: 4px;
@@ -3064,7 +3064,7 @@ a.tab.active {
   background: var(--panel-bg-subtle, rgba(0, 0, 0, 0.02));
   border: 1px dashed var(--panel-border);
   transition: all 0.2s ease;
-  width: 100%;
+  width: fit-content;
 }
 
 .checkbox-label:hover {

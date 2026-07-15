@@ -1848,7 +1848,7 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
 
   return (
     <div className="image-lightbox-backdrop" role="dialog" aria-modal="true">
-      <div className="image-lightbox image-generate-modal" style={{ maxWidth: 1000 }}>
+      <div className="image-lightbox image-generate-modal" style={{ maxWidth: 800 }}>
         <div className="image-lightbox-head">
           <div>
             <div className="section-title">AI 生成替换</div>
