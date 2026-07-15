@@ -32,6 +32,7 @@ interface Props {
   videoId: string;
   version: string;
   initial: ScriptReviewPayload;
+  readOnly?: boolean;
 }
 
 function statusClass(status: string): string {
@@ -47,7 +48,7 @@ function statusClass(status: string): string {
   return "badge";
 }
 
-export function ScriptReviewClient({ videoId, version, initial }: Props) {
+export function ScriptReviewClient({ videoId, version, initial, readOnly = false }: Props) {
   const [data, setData] = useState<ScriptReviewPayload>(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>("");
@@ -169,23 +170,27 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
           </div>
         </div>
         <div className="row">
-          <span className={statusClass(data.review.status)}>{data.review.status}</span>
-          <span className="badge">updated: {new Date(data.review.updated_at).toLocaleString()}</span>
+          <span className={readOnly ? "badge" : statusClass(data.review.status)}>
+            {readOnly ? "只读" : data.review.status}
+          </span>
+          {!readOnly ? <span className="badge">updated: {new Date(data.review.updated_at).toLocaleString()}</span> : null}
         </div>
       </div>
 
-      <div className="row" style={{ marginTop: 12 }}>
-        <button className="secondary" disabled={saving} onClick={save}>
-          保存脚本
-        </button>
-        {data.review.status === "approved" ? (
-          <span className="approved-pill">已通过</span>
-        ) : (
-          <button className="approve-btn" disabled={saving} onClick={approve}>
-            通过脚本审核
+      {!readOnly ? (
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="secondary" disabled={saving} onClick={save}>
+            保存脚本
           </button>
-        )}
-      </div>
+          {data.review.status === "approved" ? (
+            <span className="approved-pill">已通过</span>
+          ) : (
+            <button className="approve-btn" disabled={saving} onClick={approve}>
+              通过脚本审核
+            </button>
+          )}
+        </div>
+      ) : null}
 
       {message ? <div style={{ marginTop: 10, color: "var(--muted)" }}>{message}</div> : null}
 
@@ -209,6 +214,7 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
                 </label>
                 <input
                   value={script.title}
+                  readOnly={readOnly}
                   onChange={(event) => updateScriptField(sIdx, "title", event.target.value)}
                 />
               </div>
@@ -218,6 +224,7 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
                 </label>
                 <textarea
                   value={script.cover_narration ?? ""}
+                  readOnly={readOnly}
                   onChange={(event) => updateScriptField(sIdx, "cover_narration", event.target.value)}
                 />
               </div>
@@ -229,6 +236,7 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 130px", gap: 8 }}>
                     <textarea
                       value={line.text}
+                      readOnly={readOnly}
                       onChange={(event) => updateLine(sIdx, lIdx, "text", event.target.value)}
                     />
                     <div>
@@ -237,6 +245,7 @@ export function ScriptReviewClient({ videoId, version, initial }: Props) {
                         type="number"
                         step="0.1"
                         value={line.estimated_seconds}
+                        readOnly={readOnly}
                         onChange={(event) =>
                           updateLine(sIdx, lIdx, "estimated_seconds", event.target.value)
                         }

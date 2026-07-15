@@ -382,6 +382,7 @@ export interface ProjectArtifactOverview {
     label: string;
     fileName: string;
     exists: boolean;
+    artifact: unknown | null;
   }>;
   topics: Array<{
     index: number;
@@ -822,11 +823,16 @@ export async function getProjectArtifactOverview(
     source,
     workflow,
     workflowSteps: workflowPlan?.steps?.map((step) => step.capability).filter(Boolean) as string[] ?? [],
-    artifacts: Object.entries(PIPELINE_ARTIFACTS).map(([stage, fileName]) => ({
-      stage,
-      label: stageLabel(stage),
-      fileName,
-      exists: existsSync(path.join(versionDir, fileName)),
+    artifacts: await Promise.all(Object.entries(PIPELINE_ARTIFACTS).map(async ([stage, fileName]) => {
+      const filePath = path.join(versionDir, fileName);
+      const exists = existsSync(filePath);
+      return {
+        stage,
+        label: stageLabel(stage),
+        fileName,
+        exists,
+        artifact: exists ? await readJsonFile<unknown>(filePath) : null,
+      };
     })),
     topics: normalizeTopics(topics),
     scripts: normalizeScripts(scripts),

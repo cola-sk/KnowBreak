@@ -2350,9 +2350,30 @@ a.tab.active {
   gap: 5px;
 }
 
+.artifact-stage-button {
+  width: 100%;
+  text-align: left;
+  align-items: stretch;
+  justify-content: flex-start;
+  box-shadow: none;
+}
+
+.artifact-stage-button:disabled {
+  opacity: 0.64;
+}
+
+.artifact-stage-button.done:not(:disabled) {
+  cursor: pointer;
+}
+
 .artifact-stage-card.done {
   border-color: var(--success-border);
   background: var(--success-light);
+}
+
+.artifact-stage-card.selected {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 .artifact-stage-title {
@@ -2401,11 +2422,195 @@ a.tab.active {
   line-height: 1.55;
 }
 
+.artifact-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.artifact-bullet-block {
+  display: grid;
+  gap: 6px;
+}
+
+.artifact-bullet-title {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.artifact-bullet-block ul {
+  margin-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.artifact-source-excerpt {
+  border-top: 1px dashed var(--panel-border);
+  padding-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.artifact-source-excerpt summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.artifact-source-excerpt p {
+  margin-top: 6px;
+}
+
+.transcript-segment-list {
+  display: grid;
+  gap: 8px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.transcript-segment-card {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+}
+
+.transcript-time {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: nowrap;
+}
+
+.transcript-segment-card p {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
 .artifact-script-preview {
   margin-left: 18px;
   color: var(--ink);
   font-size: 13px;
   line-height: 1.65;
+}
+
+.artifact-detail-panel {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.readonly-review-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.readonly-review-section,
+.readonly-image-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--panel);
+  display: grid;
+  gap: 10px;
+}
+
+.readonly-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.readonly-field-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.readonly-line-list {
+  display: grid;
+  gap: 8px;
+}
+
+.readonly-line-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 8px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.readonly-table-wrap {
+  overflow-x: auto;
+}
+
+.readonly-artifact-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+}
+
+.readonly-artifact-table th,
+.readonly-artifact-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--panel-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.readonly-artifact-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.readonly-review-layout textarea,
+.readonly-review-layout input {
+  background: light-dark(#f8fafc, rgba(255, 255, 255, 0.03));
+  color: var(--ink);
+}
+
+.readonly-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.readonly-image-card img {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+}
+
+.artifact-json-view {
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: light-dark(#0f172a, #020617);
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .compact-stage-strip {
@@ -2843,6 +3048,14 @@ a.tab.active {
     grid-column: 1 / -1;
     justify-content: flex-start;
     min-width: 0;
+  }
+
+  .readonly-line-card {
+    grid-template-columns: 1fr;
+  }
+
+  .transcript-segment-card {
+    grid-template-columns: 1fr;
   }
 }
 

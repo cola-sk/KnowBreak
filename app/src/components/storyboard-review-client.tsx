@@ -33,6 +33,7 @@ interface Props {
   videoId: string;
   version: string;
   initial: StoryboardReviewPayload;
+  readOnly?: boolean;
 }
 
 function statusClass(status: string): string {
@@ -48,7 +49,7 @@ function statusClass(status: string): string {
   return "badge";
 }
 
-export function StoryboardReviewClient({ videoId, version, initial }: Props) {
+export function StoryboardReviewClient({ videoId, version, initial, readOnly = false }: Props) {
   const [data, setData] = useState<StoryboardReviewPayload>(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -153,23 +154,27 @@ export function StoryboardReviewClient({ videoId, version, initial }: Props) {
           </div>
         </div>
         <div className="row">
-          <span className={statusClass(data.review.status)}>{data.review.status}</span>
-          <span className="badge">updated: {new Date(data.review.updated_at).toLocaleString()}</span>
+          <span className={readOnly ? "badge" : statusClass(data.review.status)}>
+            {readOnly ? "只读" : data.review.status}
+          </span>
+          {!readOnly ? <span className="badge">updated: {new Date(data.review.updated_at).toLocaleString()}</span> : null}
         </div>
       </div>
 
-      <div className="row" style={{ marginTop: 12 }}>
-        <button className="secondary" disabled={saving} onClick={save}>
-          保存分镜
-        </button>
-        {data.review.status === "approved" ? (
-          <span className="approved-pill">已通过</span>
-        ) : (
-          <button className="approve-btn" disabled={saving} onClick={approve}>
-            通过分镜审核
+      {!readOnly ? (
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="secondary" disabled={saving} onClick={save}>
+            保存分镜
           </button>
-        )}
-      </div>
+          {data.review.status === "approved" ? (
+            <span className="approved-pill">已通过</span>
+          ) : (
+            <button className="approve-btn" disabled={saving} onClick={approve}>
+              通过分镜审核
+            </button>
+          )}
+        </div>
+      ) : null}
 
       {message ? <div style={{ marginTop: 10, color: "var(--muted)" }}>{message}</div> : null}
 
@@ -202,6 +207,7 @@ export function StoryboardReviewClient({ videoId, version, initial }: Props) {
                       <td style={{ padding: "8px 6px" }}>
                         <textarea
                           value={shot.narration}
+                          readOnly={readOnly}
                           onChange={(event) =>
                             updateShot(bIdx, sIdx, "narration", event.target.value)
                           }
@@ -210,18 +216,21 @@ export function StoryboardReviewClient({ videoId, version, initial }: Props) {
                       <td style={{ padding: "8px 6px" }}>
                         <textarea
                           value={shot.visual}
+                          readOnly={readOnly}
                           onChange={(event) => updateShot(bIdx, sIdx, "visual", event.target.value)}
                         />
                       </td>
                       <td style={{ padding: "8px 6px" }}>
                         <textarea
                           value={shot.broll}
+                          readOnly={readOnly}
                           onChange={(event) => updateShot(bIdx, sIdx, "broll", event.target.value)}
                         />
                       </td>
                       <td style={{ padding: "8px 6px" }}>
                         <textarea
                           value={shot.subtitle}
+                          readOnly={readOnly}
                           onChange={(event) =>
                             updateShot(bIdx, sIdx, "subtitle", event.target.value)
                           }
@@ -232,6 +241,7 @@ export function StoryboardReviewClient({ videoId, version, initial }: Props) {
                           type="number"
                           step="0.1"
                           value={shot.duration}
+                          readOnly={readOnly}
                           onChange={(event) =>
                             updateShot(bIdx, sIdx, "duration", event.target.value)
                           }

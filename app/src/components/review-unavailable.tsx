@@ -1,5 +1,4 @@
-import Link from "next/link";
-
+import { ProjectArtifactOverviewClient } from "@/components/project-artifact-overview-client";
 import { StageHeader } from "@/components/stage-header";
 import type { ProjectArtifactOverview } from "@/lib/review-store";
 
@@ -52,9 +51,7 @@ export function ReviewUnavailable({
   overview,
   taskHref,
 }: ReviewUnavailableProps) {
-  const base = `/projects/${videoId}/${version}`;
   const title = overview?.title || stageLabel;
-  const generatedCount = overview?.artifacts.filter((artifact) => artifact.exists).length ?? 0;
   const subtitle = unavailableMessage(active, stageLabel, error, overview);
 
   return (
@@ -66,110 +63,21 @@ export function ReviewUnavailable({
         active={active}
         workflowSteps={overview?.workflowSteps}
       />
-      <div className="panel artifact-overview-panel">
-        <div className="artifact-overview-head">
-          <div>
-            <div className="section-title">项目产物概览</div>
-            {subtitle ? <div className="section-subtitle">{subtitle}</div> : null}
-          </div>
-          {overview || taskHref ? (
-            <div className="row artifact-overview-actions">
-              {taskHref ? (
-                <Link href={taskHref} className="badge">
-                  打开任务详情
-                </Link>
-              ) : null}
-              {overview ? (
-                <span className="badge in_review">
-                  已生成 {generatedCount}/{overview.artifacts.length}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
+      {subtitle ? (
+        <div className="notice" style={{ marginBottom: 14 }}>
+          {subtitle}
         </div>
-        <div className="artifact-overview-meta">
-          <span>项目：{videoId}</span>
-          <span>版本：{version}</span>
-          {overview?.workflow ? <span>workflow：{overview.workflow}</span> : null}
-          {overview?.source ? <span>source：{overview.source}</span> : null}
-        </div>
-
-        {overview ? (
-          <>
-            <div className="artifact-stage-grid">
-              {overview.artifacts.map((artifact) => (
-                <div className={`artifact-stage-card ${artifact.exists ? "done" : ""}`} key={artifact.stage}>
-                  <div className="artifact-stage-title">{artifact.label}</div>
-                  <div className="artifact-stage-file">{artifact.fileName}</div>
-                  <span className={artifact.exists ? "badge approved" : "badge"}>
-                    {artifact.exists ? "已生成" : "未生成"}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {overview.topics.length > 0 ? (
-              <section className="artifact-section">
-                <div className="artifact-section-head">
-                  <div className="section-title small">选题产出</div>
-                  <span className="badge">topics.json</span>
-                </div>
-                <div className="artifact-card-list">
-                  {overview.topics.map((topic) => (
-                    <article className="artifact-summary-card" key={topic.index}>
-                      <div className="artifact-summary-title">
-                        {topic.index + 1}. {topic.title}
-                      </div>
-                      {topic.hook ? <p>{topic.hook}</p> : null}
-                      {topic.angle ? <p>{topic.angle}</p> : null}
-                      {typeof topic.targetDuration === "number" ? (
-                        <div className="artifact-summary-meta">目标时长：{topic.targetDuration}s</div>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {overview.scripts.length > 0 ? (
-              <section className="artifact-section">
-                <div className="artifact-section-head">
-                  <div className="section-title small">脚本产出</div>
-                  <div className="row" style={{ gap: 8 }}>
-                    <span className="badge">scripts.json</span>
-                    <Link href={`${base}/script`} className="badge">
-                      打开脚本
-                    </Link>
-                  </div>
-                </div>
-                <div className="artifact-card-list">
-                  {overview.scripts.map((script) => (
-                    <article className="artifact-summary-card" key={script.topicIndex}>
-                      <div className="artifact-summary-title">{script.title}</div>
-                      <div className="artifact-summary-meta">
-                        {script.lineCount} 句
-                        {typeof script.totalDuration === "number" ? ` · ${script.totalDuration}s` : ""}
-                      </div>
-                      {script.previewLines.length > 0 ? (
-                        <ol className="artifact-script-preview">
-                          {script.previewLines.map((line, index) => (
-                            <li key={`${script.topicIndex}-${index}`}>{line}</li>
-                          ))}
-                        </ol>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-          </>
-        ) : (
+      ) : null}
+      {overview ? (
+        <ProjectArtifactOverviewClient overview={overview} taskHref={taskHref} />
+      ) : (
+        <div className="panel artifact-overview-panel">
           <div className="empty-state">
             <h3 className="empty-title">暂无可展示产物</h3>
             <p className="empty-desc">项目目录不存在或没有可读取的阶段文件。</p>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </main>
   );
 }

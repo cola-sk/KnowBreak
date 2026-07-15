@@ -74,6 +74,7 @@ interface Props {
   version: string;
   initial: ImageReviewPayload;
   context?: ImageReviewContext;
+  readOnly?: boolean;
 }
 
 interface CropEditorState {
@@ -206,7 +207,7 @@ function clampOffset(offset: Point, size: Size, scale: number): Point {
   };
 }
 
-export function ImageReviewClient({ videoId, version, initial, context }: Props) {
+export function ImageReviewClient({ videoId, version, initial, context, readOnly = false }: Props) {
   const [data, setData] = useState<ImageReviewPayload>(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -578,23 +579,27 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
           </div>
         </div>
         <div className="row">
-          <span className={statusClass(data.review.status)}>{data.review.status}</span>
-          <span className="badge">updated: {new Date(data.review.updated_at).toLocaleString()}</span>
+          <span className={readOnly ? "badge" : statusClass(data.review.status)}>
+            {readOnly ? "只读" : data.review.status}
+          </span>
+          {!readOnly ? <span className="badge">updated: {new Date(data.review.updated_at).toLocaleString()}</span> : null}
         </div>
       </div>
 
-      <div className="row" style={{ marginTop: 12 }}>
-        <button className="secondary" disabled={saving} onClick={saveReview}>
-          保存图片审核
-        </button>
-        {data.review.status === "approved" ? (
-          <span className="approved-pill">已通过</span>
-        ) : (
-          <button className="approve-btn" disabled={saving} onClick={approve}>
-            通过图片审核
+      {!readOnly ? (
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="secondary" disabled={saving} onClick={saveReview}>
+            保存图片审核
           </button>
-        )}
-      </div>
+          {data.review.status === "approved" ? (
+            <span className="approved-pill">已通过</span>
+          ) : (
+            <button className="approve-btn" disabled={saving} onClick={approve}>
+              通过图片审核
+            </button>
+          )}
+        </div>
+      ) : null}
 
       {message ? <div style={{ marginTop: 10, color: "var(--muted)" }}>{message}</div> : null}
 
@@ -620,6 +625,7 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
                   onGenerate={openGenerateEditor}
                   replacing={uploadingItemId === `topic_${topic.topic_index}_cover`}
                   generating={generatingItemId === `topic_${topic.topic_index}_cover`}
+                  readOnly={readOnly}
                 />
               ) : null}
               {topic.shots.map((shot) => {
@@ -639,6 +645,7 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
                     onGenerate={openGenerateEditor}
                     replacing={uploadingItemId === id}
                     generating={generatingItemId === id}
+                    readOnly={readOnly}
                   />
                 );
               })}
@@ -647,7 +654,7 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
         ))}
       </div>
 
-      {editor ? (
+      {editor && !readOnly ? (
         <ImageCropModal
           editor={editor}
           busy={saving}
@@ -656,7 +663,7 @@ export function ImageReviewClient({ videoId, version, initial, context }: Props)
           onPickAnother={replaceEditorSource}
         />
       ) : null}
-      {generateEditor ? (
+      {generateEditor && !readOnly ? (
         <ImageGenerateModal
           editor={generateEditor}
           busy={saving}
@@ -685,6 +692,7 @@ interface ImageCardProps {
   onGenerate: (itemId: string, title: string, image: ImageEntry, shotContext?: { line?: ScriptLine; shot?: StoryboardShot }) => void;
   replacing: boolean;
   generating: boolean;
+  readOnly?: boolean;
 }
 
 function ImageCard({
@@ -699,6 +707,7 @@ function ImageCard({
   onGenerate,
   replacing,
   generating,
+  readOnly = false,
 }: ImageCardProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [pasteMessage, setPasteMessage] = useState("");
@@ -775,6 +784,7 @@ function ImageCard({
         <label style={{ fontSize: 12, color: "var(--muted)" }}>status</label>
         <select
           value={item?.status ?? "pending"}
+          disabled={readOnly}
           onChange={(event) =>
             onChange(itemId, { status: event.target.value as ReviewItemStatus })
           }
@@ -791,44 +801,49 @@ function ImageCard({
         <label style={{ fontSize: 12, color: "var(--muted)" }}>notes</label>
         <textarea
           value={item?.notes ?? ""}
+          readOnly={readOnly}
           onChange={(event) => onChange(itemId, { notes: event.target.value })}
         />
       </div>
 
-      <div className="row" style={{ marginTop: 8 }}>
-        <button className="secondary" onClick={() => onChange(itemId, { status: "approved" })}>
-          通过此图
-        </button>
-        <button className="secondary" onClick={() => onChange(itemId, { status: "rejected" })}>
-          标记问题
-        </button>
-      </div>
+      {!readOnly ? (
+        <>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="secondary" onClick={() => onChange(itemId, { status: "approved" })}>
+              通过此图
+            </button>
+            <button className="secondary" onClick={() => onChange(itemId, { status: "rejected" })}>
+              标记问题
+            </button>
+          </div>
 
-      <div className="row" style={{ marginTop: 8 }}>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          style={{ display: "none" }}
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            if (!file) {
-              return;
-            }
-            onReplaceFile(itemId, title, file);
-            event.currentTarget.value = "";
-          }}
-        />
-        <button className="secondary" disabled={replacing} onClick={() => inputRef.current?.click()}>
-          {replacing ? "替换中..." : "上传并裁剪"}
-        </button>
-        <button className="secondary" disabled={generating} onClick={() => onGenerate(itemId, title, image, shotContext)}>
-          {generating ? "生成中..." : "AI 生成替换"}
-        </button>
-        <button className="secondary" disabled={replacing} onClick={pasteFromClipboard}>
-          粘贴图片
-        </button>
-      </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) {
+                  return;
+                }
+                onReplaceFile(itemId, title, file);
+                event.currentTarget.value = "";
+              }}
+            />
+            <button className="secondary" disabled={replacing} onClick={() => inputRef.current?.click()}>
+              {replacing ? "替换中..." : "上传并裁剪"}
+            </button>
+            <button className="secondary" disabled={generating} onClick={() => onGenerate(itemId, title, image, shotContext)}>
+              {generating ? "生成中..." : "AI 生成替换"}
+            </button>
+            <button className="secondary" disabled={replacing} onClick={pasteFromClipboard}>
+              粘贴图片
+            </button>
+          </div>
+        </>
+      ) : null}
       {pasteMessage ? (
         <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 12, lineHeight: 1.4 }}>
           {pasteMessage}
