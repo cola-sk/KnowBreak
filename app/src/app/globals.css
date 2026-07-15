@@ -1246,7 +1246,7 @@ a.tab.active {
 
 .image-provider-checklist {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 8px;
 }
 
@@ -1286,6 +1286,20 @@ a.tab.active {
 
 .image-provider-option .badge {
   margin-left: auto;
+}
+
+.provider-order-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .badge.search {

@@ -254,17 +254,17 @@ export function ImageSettingsEditor({
 
   const toggleProvider = (provider: string) => {
     const exists = effective.providers.includes(provider);
-    const selected = new Set(
-      exists
-        ? effective.providers.filter((item) => item !== provider)
-        : [...effective.providers, provider],
-    );
-    const providers = IMAGE_PROVIDER_OPTIONS
-      .map((option) => option.value)
-      .filter((item) => selected.has(item));
+    let nextProviders = exists
+      ? effective.providers.filter((item) => item !== provider)
+      : [...effective.providers, provider];
+
+    // Filter to only include valid options
+    const validValues = new Set(IMAGE_PROVIDER_OPTIONS.map((o) => o.value));
+    nextProviders = nextProviders.filter((p) => validValues.has(p as any));
+
     commitSettings({
       ...effective,
-      providers: providers.length > 0 ? providers : defaults.providers,
+      providers: nextProviders.length > 0 ? nextProviders : defaults.providers,
     });
   };
 
@@ -280,26 +280,35 @@ export function ImageSettingsEditor({
       <div style={{ display: "grid", gap: 8 }}>
         <label style={{ fontSize: 12, color: "var(--muted)" }}>{defaultLabel}</label>
         <div className="image-provider-checklist">
-          {IMAGE_PROVIDER_OPTIONS.map((option) => (
-            <label
-              key={option.value}
-              className={`image-provider-option ${effective.providers.includes(option.value) ? "active" : ""}`}
-            >
-              <input
-                type="checkbox"
-                disabled={disabled}
-                checked={effective.providers.includes(option.value)}
-                onChange={() => toggleProvider(option.value)}
-              />
-              <span>{option.label}</span>
-              <span className={`badge ${option.kind === "search" ? "search" : "generate"}`}>
-                {option.kind === "search" ? "图库" : "生成"}
-              </span>
-            </label>
-          ))}
+          {IMAGE_PROVIDER_OPTIONS.map((option) => {
+            const index = effective.providers.indexOf(option.value);
+            const isSelected = index !== -1;
+            return (
+              <label
+                key={option.value}
+                className={`image-provider-option ${isSelected ? "active" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={disabled}
+                  checked={isSelected}
+                  onChange={() => toggleProvider(option.value)}
+                />
+                {isSelected && (
+                  <span className="provider-order-badge" title={`优先级：第 ${index + 1} 位`}>
+                    {index + 1}
+                  </span>
+                )}
+                <span>{option.label}</span>
+                <span className={`badge ${option.kind === "search" ? "search" : "generate"}`}>
+                  {option.kind === "search" ? "图库" : "生成"}
+                </span>
+              </label>
+            );
+          })}
         </div>
         <div className="section-subtitle">
-          顺序按上方固定顺序写入 <code>KB_IMAGE_PROVIDERS</code>；未勾选的 provider 不会参与图片阶段。
+          勾选的顺序决定优先级顺序（写入 <code>KB_IMAGE_PROVIDERS</code>）；未勾选的 provider 不会参与图片阶段。
         </div>
       </div>
 
