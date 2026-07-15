@@ -41,6 +41,7 @@ export default async function ProductionReviewPage({ params }: Props) {
           active="review"
           reviewStatuses={reviewStatuses}
           workflowSteps={initial.workflowSteps}
+          hasProductionArtifact={Boolean(initial.artifacts.compose)}
         />
         <ProductionReviewClient
           initial={initial}
@@ -61,7 +62,7 @@ export default async function ProductionReviewPage({ params }: Props) {
         videoId={videoId}
         version={version}
         active="review"
-        stageLabel="成片审核"
+        stageLabel="成片查看"
         error={error}
         overview={overview ?? undefined}
         taskHref={taskHref}

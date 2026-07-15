@@ -22,8 +22,12 @@ function isApproved(review: Props["review"]): boolean {
   return REVIEW_STAGES.every((stage) => review[stage] === "approved");
 }
 
-function hasReviewableArtifact(doneStages: string[]): boolean {
-  return doneStages.some((stage) => ["script", "storyboard", "images", "compose"].includes(stage));
+function hasAnyArtifact(doneStages: string[]): boolean {
+  return doneStages.length > 0;
+}
+
+function hasReviewState(review: Props["review"]): boolean {
+  return REVIEW_STAGES.some((stage) => Boolean(review[stage]));
 }
 
 function TrashIcon() {
@@ -72,8 +76,8 @@ export function VersionActions({ videoId, version, doneStages, review, detailHre
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const approved = isApproved(review);
-  const canApprove = !approved && hasReviewableArtifact(doneStages);
-  const showEnterReview = !approved && hasReviewableArtifact(doneStages);
+  const canApprove = !approved && hasReviewState(review);
+  const showOpenDetail = hasAnyArtifact(doneStages);
   const canDeleteVersion = version !== "legacy";
 
   const copyStartPreset = async () => {
@@ -138,12 +142,12 @@ export function VersionActions({ videoId, version, doneStages, review, detailHre
         >
           <CopyIcon />
         </button>
-        {showEnterReview ? (
+        {showOpenDetail ? (
           <a
             className="icon-btn reveal-action-btn"
             href={detailHref}
-            aria-label={`进入版本 ${version} 审核`}
-            title="进入审核"
+            aria-label={`打开版本 ${version} 详情`}
+            title="打开详情"
           >
             <ReviewIcon />
           </a>

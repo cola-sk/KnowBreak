@@ -91,16 +91,16 @@ function versionDetailHref(
   if (item.doneStages.includes("compose")) {
     return `/projects/${videoId}/${version}/review`;
   }
-  if (item.review.script_review !== "approved") {
+  if (item.review.script_review && item.review.script_review !== "approved") {
     return `/projects/${videoId}/${version}/script`;
   }
-  if (item.review.storyboard_review !== "approved") {
+  if (item.review.storyboard_review && item.review.storyboard_review !== "approved") {
     return `/projects/${videoId}/${version}/storyboard`;
   }
-  if (item.review.image_review !== "approved") {
+  if (item.review.image_review && item.review.image_review !== "approved") {
     return `/projects/${videoId}/${version}/images`;
   }
-  return `/projects/${videoId}/${version}/script`;
+  return `/projects/${videoId}/${version}/review`;
 }
 
 function TrashIcon() {

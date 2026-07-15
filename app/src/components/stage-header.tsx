@@ -9,12 +9,13 @@ interface StageHeaderProps {
   active: "review" | "script" | "storyboard" | "images";
   reviewStatuses?: Partial<Record<ReviewStage, ReviewStatus>>;
   workflowSteps?: string[];
+  hasProductionArtifact?: boolean;
 }
 
 type StageKey = "review" | "script" | "storyboard" | "images";
 
 const STAGE_LABELS: Record<StageKey, string> = {
-  review: "成片审核",
+  review: "成片查看",
   script: "脚本审核",
   storyboard: "分镜审核",
   images: "图片审核",
@@ -54,10 +55,18 @@ function isStageApproved(
   return statuses?.[reviewStage] === "approved";
 }
 
-export function StageHeader({ videoId, version, title, active, reviewStatuses, workflowSteps }: StageHeaderProps) {
+export function StageHeader({
+  videoId,
+  version,
+  title,
+  active,
+  reviewStatuses,
+  workflowSteps,
+  hasProductionArtifact = false,
+}: StageHeaderProps) {
   const base = `/projects/${videoId}/${version}`;
-  const reviewStagesInWorkflow = workflowStepsToStages(workflowSteps);
-  const stages: StageKey[] = reviewStagesInWorkflow ?? ["review", "script", "storyboard", "images"];
+  const stages = workflowStepsToStages(workflowSteps);
+  const showProductionLink = hasProductionArtifact;
 
   return (
     <div className="panel" style={{ padding: 14, marginBottom: 14 }}>
@@ -80,8 +89,13 @@ export function StageHeader({ videoId, version, title, active, reviewStatuses, w
           </Link>
         </div>
       </div>
-      {stages.length > 0 ? (
+      {showProductionLink || stages.length > 0 ? (
         <div className="row" style={{ marginTop: 12, gap: 8 }}>
+          {showProductionLink ? (
+            <Link href={`${base}/review`} className={`tab ${active === "review" ? "active" : ""}`}>
+              {STAGE_LABELS.review}
+            </Link>
+          ) : null}
           {stages.map((stage) => {
             const approved = isStageApproved(stage, reviewStatuses);
             const label = STAGE_LABELS[stage];
@@ -104,18 +118,11 @@ export function StageHeader({ videoId, version, title, active, reviewStatuses, w
   );
 }
 
-function workflowStepsToStages(workflowSteps: string[] | undefined): StageKey[] | null {
+function workflowStepsToStages(workflowSteps: string[] | undefined): StageKey[] {
   if (!workflowSteps) {
-    return null;
+    return [];
   }
   const stages: StageKey[] = [];
-  if (
-    workflowSteps.includes("script_review") ||
-    workflowSteps.includes("storyboard_review") ||
-    workflowSteps.includes("image_review")
-  ) {
-    stages.push("review");
-  }
   if (workflowSteps.includes("script_review")) {
     stages.push("script");
   }

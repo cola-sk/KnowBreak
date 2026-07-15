@@ -33,6 +33,7 @@ export default async function StoryboardReviewPage({ params }: Props) {
           active="storyboard"
           reviewStatuses={reviewStatuses}
           workflowSteps={overview?.workflowSteps}
+          hasProductionArtifact={Boolean(overview?.artifacts.some((artifact) => artifact.stage === "compose" && artifact.exists))}
         />
         <StoryboardReviewClient videoId={videoId} version={version} initial={initial} />
       </main>

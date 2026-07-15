@@ -30,6 +30,7 @@ export default async function ScriptReviewPage({ params }: Props) {
           active="script"
           reviewStatuses={reviewStatuses}
           workflowSteps={overview?.workflowSteps}
+          hasProductionArtifact={Boolean(overview?.artifacts.some((artifact) => artifact.stage === "compose" && artifact.exists))}
         />
         <ScriptReviewClient videoId={videoId} version={version} initial={initial} />
       </main>

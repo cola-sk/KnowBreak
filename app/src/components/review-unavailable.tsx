@@ -21,6 +21,10 @@ function hasReviewStage(overview: ProjectArtifactOverview | undefined): boolean 
   return steps.includes("script_review") || steps.includes("storyboard_review") || steps.includes("image_review");
 }
 
+function hasProductionArtifact(overview: ProjectArtifactOverview | undefined): boolean {
+  return Boolean(overview?.artifacts.some((artifact) => artifact.stage === "compose" && artifact.exists));
+}
+
 function unavailableMessage(
   active: ReviewUnavailableProps["active"],
   stageLabel: string,
@@ -62,6 +66,7 @@ export function ReviewUnavailable({
         title={title}
         active={active}
         workflowSteps={overview?.workflowSteps}
+        hasProductionArtifact={hasProductionArtifact(overview)}
       />
       {subtitle ? (
         <div className="notice" style={{ marginBottom: 14 }}>

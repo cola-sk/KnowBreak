@@ -36,6 +36,7 @@ export default async function ImageReviewPage({ params }: Props) {
           active="images"
           reviewStatuses={reviewStatuses}
           workflowSteps={overview?.workflowSteps}
+          hasProductionArtifact={Boolean(overview?.artifacts.some((artifact) => artifact.stage === "compose" && artifact.exists))}
         />
         <ImageReviewClient
           videoId={videoId}

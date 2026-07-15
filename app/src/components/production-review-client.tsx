@@ -399,13 +399,15 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   const sourceInputEnabled = sourceInputApplies(startFrom);
   const sourceInputLabel = data.workflowSteps.includes("asr") ? "source / 视频源" : "topic / 主题输入";
   const imageToken = data.reviews.image_review?.updated_at ?? data.job?.finishedAt ?? data.version;
-  const allReviewStagesApproved = (
-    data.reviews.script_review?.status === "approved"
-    && data.reviews.storyboard_review?.status === "approved"
-    && data.reviews.image_review?.status === "approved"
+  const configuredReviewStages = (Object.keys(REVIEW_STAGE_LABELS) as ReviewStage[]).filter((stage) =>
+    data.workflowSteps.includes(stage),
+  );
+  const hasConfiguredReviewStages = configuredReviewStages.length > 0;
+  const allReviewStagesApproved = hasConfiguredReviewStages && configuredReviewStages.every(
+    (stage) => data.reviews[stage]?.status === "approved",
   );
   const pendingReviewLabels = (Object.entries(REVIEW_STAGE_LABELS) as Array<[ReviewStage, string]>)
-    .filter(([stage]) => data.reviews[stage]?.status !== "approved")
+    .filter(([stage]) => configuredReviewStages.includes(stage) && data.reviews[stage]?.status !== "approved")
     .map(([, label]) => label);
   const workflowStageProgress = useMemo(() => {
     const artifactDone: Record<string, boolean> = {
@@ -892,7 +894,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
         throw new Error(payload.error ?? "标记通过失败");
       }
       await refreshData();
-      setMessage("成片已标记通过，脚本/分镜/图片审核状态已同步为 approved。");
+      setMessage("已同步通过当前工作流配置的审核阶段。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "标记通过失败");
     } finally {
@@ -1114,7 +1116,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
         <section className="panel" style={{ padding: 16 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 18 }}>成片播放审核</div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>成片播放检查</div>
               <div style={{ color: "var(--muted)", fontSize: 13 }}>
                 workflow: {data.workflow}, source: {data.source}
               </div>
@@ -1124,8 +1126,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
                 {refreshing ? "刷新中" : "刷新状态"}
               </button>
               {allReviewStagesApproved ? (
-                <span className="approved-pill">成片已通过</span>
-              ) : (
+                <span className="approved-pill">审核已通过</span>
+              ) : hasConfiguredReviewStages ? (
                 <>
                   {pendingReviewLabels.length > 0 ? (
                     <span className="badge warning">待处理：{pendingReviewLabels.join(" / ")}</span>
@@ -1135,12 +1137,12 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
                     className="approve-btn compact-btn"
                     disabled={saving || regenerating || refreshing || approvingProduction}
                     onClick={approveProduction}
-                    title="保存当前页面修改，并将脚本/分镜/图片审核标记为通过"
+                    title="保存当前页面修改，并将当前工作流配置的审核阶段标记为通过"
                   >
-                    {approvingProduction ? "处理中..." : "通过成片审核"}
+                    {approvingProduction ? "处理中..." : "同步通过审核"}
                   </button>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
           <div className="section-subtitle" style={{ marginTop: 8 }}>
@@ -1248,7 +1250,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
                 style={{ width: "100%", justifyContent: "space-between", fontSize: 12, padding: "8px 12px" }}
               >
                 <span>自定义项目专属参数 {projectConfigOverrideCount > 0 ? `(${projectConfigOverrideCount} 项修改)` : ""}</span>
-                <span>打开封面 / 内容 / TTS</span>
+                <span>打开封面 / 内容 / TTS / 图片</span>
               </button>
               <div className="section-subtitle">随本次重生成请求保存为项目级修改，不影响全局设置。</div>
             </div>
