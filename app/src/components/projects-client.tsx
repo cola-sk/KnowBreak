@@ -21,16 +21,26 @@ interface Props {
 }
 
 function isVersionApproved(version: {
+  workflowSteps: string[];
   review: Partial<Record<(typeof REVIEW_STAGES)[number], ReviewStatus>>;
 }): boolean {
-  return REVIEW_STAGES.every((stage) => version.review[stage] === "approved");
+  const reviewStages = configuredReviewStages(version.workflowSteps);
+  return reviewStages.length > 0 && reviewStages.every((stage) => version.review[stage] === "approved");
 }
 
 function isVersionOpen(version: {
+  workflowSteps: string[];
   review: Partial<Record<(typeof REVIEW_STAGES)[number], ReviewStatus>>;
   ignored: boolean;
 }): boolean {
+  if (configuredReviewStages(version.workflowSteps).length === 0) {
+    return false;
+  }
   return !version.ignored && !isVersionApproved(version);
+}
+
+function configuredReviewStages(workflowSteps: string[]): Array<(typeof REVIEW_STAGES)[number]> {
+  return REVIEW_STAGES.filter((stage) => workflowSteps.includes(stage));
 }
 
 function reviewBadge(status: ReviewStatus | undefined): string {
@@ -85,19 +95,21 @@ function versionDetailHref(
   version: string,
   item: {
     doneStages: string[];
+    workflowSteps: string[];
     review: Partial<Record<(typeof REVIEW_STAGES)[number], ReviewStatus>>;
   },
 ): string {
   if (item.doneStages.includes("compose")) {
     return `/projects/${videoId}/${version}/review`;
   }
-  if (item.review.script_review && item.review.script_review !== "approved") {
+  const reviewStages = configuredReviewStages(item.workflowSteps);
+  if (reviewStages.includes("script_review") && item.review.script_review !== "approved") {
     return `/projects/${videoId}/${version}/script`;
   }
-  if (item.review.storyboard_review && item.review.storyboard_review !== "approved") {
+  if (reviewStages.includes("storyboard_review") && item.review.storyboard_review !== "approved") {
     return `/projects/${videoId}/${version}/storyboard`;
   }
-  if (item.review.image_review && item.review.image_review !== "approved") {
+  if (reviewStages.includes("image_review") && item.review.image_review !== "approved") {
     return `/projects/${videoId}/${version}/images`;
   }
   return `/projects/${videoId}/${version}/review`;
@@ -239,6 +251,7 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
               <div className="version-stack">
                 {project.versions.map((v) => {
                   const detailHref = versionDetailHref(project.videoId, v.version, v);
+                  const reviewStages = configuredReviewStages(v.workflowSteps);
                   return (
                     <div
                       key={`${project.videoId}-${v.version}`}
@@ -264,6 +277,7 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
                             videoId={project.videoId}
                             version={v.version}
                             doneStages={v.doneStages}
+                            workflowSteps={v.workflowSteps}
                             review={v.review}
                             detailHref={detailHref}
                             onChanged={refresh}
@@ -279,11 +293,19 @@ export function ProjectsClient({ initialProjects, filter }: Props) {
                           </span>
                         </div>
 
-                        <div className="version-reviews">
-                          <span className={reviewBadge(v.review.script_review)}>文案: {v.review.script_review ?? "pending"}</span>
-                          <span className={reviewBadge(v.review.storyboard_review)}>分镜: {v.review.storyboard_review ?? "pending"}</span>
-                          <span className={reviewBadge(v.review.image_review)}>图片: {v.review.image_review ?? "pending"}</span>
-                        </div>
+                        {reviewStages.length > 0 ? (
+                          <div className="version-reviews">
+                            {reviewStages.includes("script_review") ? (
+                              <span className={reviewBadge(v.review.script_review)}>文案: {v.review.script_review ?? "pending"}</span>
+                            ) : null}
+                            {reviewStages.includes("storyboard_review") ? (
+                              <span className={reviewBadge(v.review.storyboard_review)}>分镜: {v.review.storyboard_review ?? "pending"}</span>
+                            ) : null}
+                            {reviewStages.includes("image_review") ? (
+                              <span className={reviewBadge(v.review.image_review)}>图片: {v.review.image_review ?? "pending"}</span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                       <time className="version-time version-time-bottom">
                         {formatDate(v.updatedAt)}

@@ -34,6 +34,7 @@ export interface VersionSummary {
   version: string;
   title: string;
   doneStages: string[];
+  workflowSteps: string[];
   review: Partial<Record<ReviewStage, ReviewStatus>>;
   updatedAt: string;
   ignored: boolean;

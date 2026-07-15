@@ -1373,10 +1373,15 @@ async function buildVersionSummary(videoId: string, version: string, versionDir:
   const doneStages = Object.entries(PIPELINE_ARTIFACTS)
     .filter(([, fileName]) => existsSync(path.join(versionDir, fileName)))
     .map(([stage]) => stage);
+  const workflowPlan = await readWorkflowPlan(versionDir);
+  const workflowSteps = workflowPlan?.steps?.map((step) => step.capability).filter(Boolean) as string[] ?? [];
 
   const reviewStatuses: Partial<Record<ReviewStage, ReviewStatus>> = {};
   const reviewDir = path.join(versionDir, "reviews");
   for (const [stage, fileName] of Object.entries(REVIEW_FILE) as Array<[ReviewStage, string]>) {
+    if (!workflowSteps.includes(stage)) {
+      continue;
+    }
     const filePath = path.join(reviewDir, fileName);
     const review = await readJsonFile<ReviewFile>(filePath);
     if (review) {
@@ -1390,6 +1395,7 @@ async function buildVersionSummary(videoId: string, version: string, versionDir:
     version,
     title: await inferVersionTitle(versionDir),
     doneStages,
+    workflowSteps,
     review: reviewStatuses,
     updatedAt,
     ignored: Boolean(flags?.ignored),

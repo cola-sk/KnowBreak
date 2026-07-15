@@ -13,21 +13,27 @@ interface Props {
   videoId: string;
   version: string;
   doneStages: string[];
+  workflowSteps: string[];
   review: Partial<Record<(typeof REVIEW_STAGES)[number], ReviewStatus>>;
   detailHref: string;
   onChanged: () => Promise<void>;
 }
 
-function isApproved(review: Props["review"]): boolean {
-  return REVIEW_STAGES.every((stage) => review[stage] === "approved");
+function configuredReviewStages(workflowSteps: string[]): Array<(typeof REVIEW_STAGES)[number]> {
+  return REVIEW_STAGES.filter((stage) => workflowSteps.includes(stage));
+}
+
+function isApproved(workflowSteps: string[], review: Props["review"]): boolean {
+  const reviewStages = configuredReviewStages(workflowSteps);
+  return reviewStages.length > 0 && reviewStages.every((stage) => review[stage] === "approved");
 }
 
 function hasAnyArtifact(doneStages: string[]): boolean {
   return doneStages.length > 0;
 }
 
-function hasReviewState(review: Props["review"]): boolean {
-  return REVIEW_STAGES.some((stage) => Boolean(review[stage]));
+function hasReviewState(workflowSteps: string[]): boolean {
+  return configuredReviewStages(workflowSteps).length > 0;
 }
 
 function TrashIcon() {
@@ -70,13 +76,13 @@ function CopyIcon() {
   );
 }
 
-export function VersionActions({ videoId, version, doneStages, review, detailHref, onChanged }: Props) {
+export function VersionActions({ videoId, version, doneStages, workflowSteps, review, detailHref, onChanged }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const approved = isApproved(review);
-  const canApprove = !approved && hasReviewState(review);
+  const approved = isApproved(workflowSteps, review);
+  const canApprove = !approved && hasReviewState(workflowSteps);
   const showOpenDetail = hasAnyArtifact(doneStages);
   const canDeleteVersion = version !== "legacy";
 
