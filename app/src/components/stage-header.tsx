@@ -67,6 +67,7 @@ export function StageHeader({
   const base = `/projects/${videoId}/${version}`;
   const stages = workflowStepsToStages(workflowSteps);
   const showProductionLink = hasProductionArtifact;
+  const totalTabs = (showProductionLink ? 1 : 0) + stages.length;
 
   return (
     <div className="panel" style={{ padding: 14, marginBottom: 14 }}>
@@ -89,7 +90,7 @@ export function StageHeader({
           </Link>
         </div>
       </div>
-      {showProductionLink || stages.length > 0 ? (
+      {totalTabs > 1 ? (
         <div className="row" style={{ marginTop: 12, gap: 8 }}>
           {showProductionLink ? (
             <Link href={`${base}/review`} className={`tab ${active === "review" ? "active" : ""}`}>
