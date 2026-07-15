@@ -10,6 +10,7 @@ interface ReviewUnavailableProps {
   stageLabel: string;
   error: unknown;
   overview?: ProjectArtifactOverview;
+  taskHref?: string;
 }
 
 function errorMessage(error: unknown): string {
@@ -26,9 +27,9 @@ function unavailableMessage(
   stageLabel: string,
   error: unknown,
   overview: ProjectArtifactOverview | undefined,
-): string {
+): string | null {
   if (overview && !hasReviewStage(overview)) {
-    return "当前工作流未配置审核阶段，下面展示已生成的阶段产物。";
+    return null;
   }
 
   const raw = errorMessage(error);
@@ -49,6 +50,7 @@ export function ReviewUnavailable({
   stageLabel,
   error,
   overview,
+  taskHref,
 }: ReviewUnavailableProps) {
   const base = `/projects/${videoId}/${version}`;
   const title = overview?.title || stageLabel;
@@ -68,14 +70,21 @@ export function ReviewUnavailable({
         <div className="artifact-overview-head">
           <div>
             <div className="section-title">项目产物概览</div>
-            <div className="section-subtitle">
-              {subtitle}
-            </div>
+            {subtitle ? <div className="section-subtitle">{subtitle}</div> : null}
           </div>
-          {overview ? (
-            <span className="badge in_review">
-              已生成 {generatedCount}/{overview.artifacts.length}
-            </span>
+          {overview || taskHref ? (
+            <div className="row artifact-overview-actions">
+              {taskHref ? (
+                <Link href={taskHref} className="badge">
+                  打开任务详情
+                </Link>
+              ) : null}
+              {overview ? (
+                <span className="badge in_review">
+                  已生成 {generatedCount}/{overview.artifacts.length}
+                </span>
+              ) : null}
+            </div>
           ) : null}
         </div>
         <div className="artifact-overview-meta">

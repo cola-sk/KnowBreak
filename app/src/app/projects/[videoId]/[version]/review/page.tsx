@@ -6,10 +6,17 @@ import { ReviewUnavailable } from "@/components/review-unavailable";
 import { StageHeader } from "@/components/stage-header";
 import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
 import { getProductionReviewData, getProjectArtifactOverview } from "@/lib/review-store";
+import { listStartJobs } from "@/lib/start-store";
 import { readTtsRuntimeDefaults } from "@/lib/tts-settings-server";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
+}
+
+async function findTaskHref(videoId: string, version: string): Promise<string | undefined> {
+  const jobs = await listStartJobs().catch(() => []);
+  const exact = jobs.find((job) => job.videoId === videoId && job.version === version);
+  return exact ? `/tasks/${exact.id}` : undefined;
 }
 
 export default async function ProductionReviewPage({ params }: Props) {
@@ -43,7 +50,10 @@ export default async function ProductionReviewPage({ params }: Props) {
       </main>
     );
   } catch (error) {
-    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
+    const [overview, taskHref] = await Promise.all([
+      getProjectArtifactOverview(videoId, version).catch(() => null),
+      findTaskHref(videoId, version),
+    ]);
     return (
       <ReviewUnavailable
         videoId={videoId}
@@ -52,6 +62,7 @@ export default async function ProductionReviewPage({ params }: Props) {
         stageLabel="成片审核"
         error={error}
         overview={overview ?? undefined}
+        taskHref={taskHref}
       />
     );
   }
