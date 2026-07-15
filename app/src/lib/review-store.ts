@@ -321,14 +321,30 @@ interface WorkflowPlan {
 
 interface TopicsArtifact {
   topics?: Array<{
+    index?: number;
+    topic_index?: number;
     title?: string;
     hook?: string;
     angle?: string;
+    target_duration?: number;
   }>;
 }
 
 interface TranscriptArtifact {
   source?: string;
+}
+
+interface ScriptArtifact {
+  scripts?: Array<{
+    topic_index?: number;
+    title?: string;
+    cover_narration?: string;
+    total_duration?: number;
+    lines?: Array<{
+      text?: string;
+      estimated_seconds?: number;
+    }>;
+  }>;
 }
 
 export interface ProductionReviewData {
@@ -353,6 +369,36 @@ export interface ProductionReviewData {
   runtimeOverrides?: ProjectRuntimeOverrides;
 }
 
+export interface ProjectArtifactOverview {
+  videoId: string;
+  version: string;
+  title: string;
+  versionDir: string;
+  source: string | null;
+  workflow: string;
+  workflowSteps: string[];
+  artifacts: Array<{
+    stage: string;
+    label: string;
+    fileName: string;
+    exists: boolean;
+  }>;
+  topics: Array<{
+    index: number;
+    title: string;
+    hook?: string;
+    angle?: string;
+    targetDuration?: number;
+  }>;
+  scripts: Array<{
+    topicIndex: number;
+    title: string;
+    lineCount: number;
+    totalDuration?: number;
+    previewLines: string[];
+  }>;
+}
+
 export interface StartPresetData {
   input: string;
   source: string;
@@ -368,6 +414,68 @@ export interface StartPresetData {
 
 async function readArtifact(videoId: string, version: string, stage: ArtifactStage): Promise<unknown | null> {
   return readJsonFile<unknown>(artifactPath(videoId, version, stage));
+}
+
+function stageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    asr: "ASR",
+    extract: "知识提取",
+    topics: "选题",
+    topic_seed: "主题播种",
+    rewrite: "改写",
+    script: "脚本",
+    storyboard: "分镜",
+    assets: "资源",
+    images: "图片",
+    tts: "配音",
+    compose: "合成",
+  };
+  return labels[stage] ?? stage;
+}
+
+function topicIndexOf(
+  topic: NonNullable<TopicsArtifact["topics"]>[number],
+  fallback: number,
+): number {
+  if (typeof topic.index === "number") {
+    return topic.index;
+  }
+  if (typeof topic.topic_index === "number") {
+    return topic.topic_index;
+  }
+  return fallback;
+}
+
+function normalizeTopics(topics: TopicsArtifact | null): ProjectArtifactOverview["topics"] {
+  if (!Array.isArray(topics?.topics)) {
+    return [];
+  }
+  return topics.topics.map((topic, fallbackIndex) => ({
+    index: topicIndexOf(topic, fallbackIndex),
+    title: topic.title?.trim() || `选题 ${fallbackIndex + 1}`,
+    hook: topic.hook?.trim() || undefined,
+    angle: topic.angle?.trim() || undefined,
+    targetDuration: topic.target_duration,
+  }));
+}
+
+function normalizeScripts(scripts: ScriptArtifact | null): ProjectArtifactOverview["scripts"] {
+  if (!Array.isArray(scripts?.scripts)) {
+    return [];
+  }
+  return scripts.scripts.map((script, fallbackIndex) => {
+    const lines = Array.isArray(script.lines) ? script.lines : [];
+    return {
+      topicIndex: typeof script.topic_index === "number" ? script.topic_index : fallbackIndex,
+      title: script.title?.trim() || script.cover_narration?.trim() || `脚本 ${fallbackIndex + 1}`,
+      lineCount: lines.length,
+      totalDuration: script.total_duration,
+      previewLines: lines
+        .map((line) => line.text?.trim())
+        .filter((text): text is string => Boolean(text))
+        .slice(0, 4),
+    };
+  });
 }
 
 async function readWorkflowPlan(versionDir: string): Promise<WorkflowPlan | null> {
@@ -685,6 +793,43 @@ export async function getProductionReviewData(
     regenerationJobs: await listRegenerationJobs(videoId, version),
     projectOverrides,
     runtimeOverrides,
+  };
+}
+
+export async function getProjectArtifactOverview(
+  videoId: string,
+  version: string,
+): Promise<ProjectArtifactOverview> {
+  const versionDir = getVersionDir(videoId, version);
+  if (!existsSync(versionDir)) {
+    throw new Error(`Version not found: ${version}`);
+  }
+
+  const workflowPlan = await readWorkflowPlan(versionDir);
+  const topics = await readJsonFile<TopicsArtifact>(path.join(versionDir, "topics.json"));
+  const scripts = await readJsonFile<ScriptArtifact>(path.join(versionDir, "scripts.json"));
+  const source = await inferRegenerationSource(versionDir).catch(() => null);
+  const workflow = await resolveWorkflowCliName(
+    workflowPlan?.workflow ?? "custom/serious_science_one",
+    workflowPlan?.profile ?? "default",
+  );
+
+  return {
+    videoId,
+    version,
+    title: await inferVersionTitle(versionDir),
+    versionDir,
+    source,
+    workflow,
+    workflowSteps: workflowPlan?.steps?.map((step) => step.capability).filter(Boolean) as string[] ?? [],
+    artifacts: Object.entries(PIPELINE_ARTIFACTS).map(([stage, fileName]) => ({
+      stage,
+      label: stageLabel(stage),
+      fileName,
+      exists: existsSync(path.join(versionDir, fileName)),
+    })),
+    topics: normalizeTopics(topics),
+    scripts: normalizeScripts(scripts),
   };
 }
 

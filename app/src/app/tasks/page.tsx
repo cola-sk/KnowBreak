@@ -16,7 +16,7 @@ export default async function TasksPage() {
   }));
 
   return (
-    <main className="shell task-shell">
+    <main className="shell">
       <div className="page-header">
         <div className="hero-eyebrow">Pipeline Tasks</div>
         <h1 className="hero-title">任务中心</h1>

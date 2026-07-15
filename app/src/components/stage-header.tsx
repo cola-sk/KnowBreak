@@ -8,6 +8,7 @@ interface StageHeaderProps {
   title?: string;
   active: "review" | "script" | "storyboard" | "images";
   reviewStatuses?: Partial<Record<ReviewStage, ReviewStatus>>;
+  workflowSteps?: string[];
 }
 
 type StageKey = "review" | "script" | "storyboard" | "images";
@@ -53,9 +54,10 @@ function isStageApproved(
   return statuses?.[reviewStage] === "approved";
 }
 
-export function StageHeader({ videoId, version, title, active, reviewStatuses }: StageHeaderProps) {
+export function StageHeader({ videoId, version, title, active, reviewStatuses, workflowSteps }: StageHeaderProps) {
   const base = `/projects/${videoId}/${version}`;
-  const stages: StageKey[] = ["review", "script", "storyboard", "images"];
+  const reviewStagesInWorkflow = workflowStepsToStages(workflowSteps);
+  const stages: StageKey[] = reviewStagesInWorkflow ?? ["review", "script", "storyboard", "images"];
 
   return (
     <div className="panel" style={{ padding: 14, marginBottom: 14 }}>
@@ -78,24 +80,50 @@ export function StageHeader({ videoId, version, title, active, reviewStatuses }:
           </Link>
         </div>
       </div>
-      <div className="row" style={{ marginTop: 12, gap: 8 }}>
-        {stages.map((stage) => {
-          const approved = isStageApproved(stage, reviewStatuses);
-          const label = STAGE_LABELS[stage];
-          if (approved) {
+      {stages.length > 0 ? (
+        <div className="row" style={{ marginTop: 12, gap: 8 }}>
+          {stages.map((stage) => {
+            const approved = isStageApproved(stage, reviewStatuses);
+            const label = STAGE_LABELS[stage];
+            if (approved) {
+              return (
+                <span key={stage} className="tab approved" title={`${label} · 已通过`}>
+                  {label} · 已通过
+                </span>
+              );
+            }
             return (
-              <span key={stage} className="tab approved" title={`${label} · 已通过`}>
-                {label} · 已通过
-              </span>
+              <Link key={stage} href={`${base}/${stage}`} className={`tab ${active === stage ? "active" : ""}`}>
+                {label}
+              </Link>
             );
-          }
-          return (
-            <Link key={stage} href={`${base}/${stage}`} className={`tab ${active === stage ? "active" : ""}`}>
-              {label}
-            </Link>
-          );
-        })}
-      </div>
+          })}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function workflowStepsToStages(workflowSteps: string[] | undefined): StageKey[] | null {
+  if (!workflowSteps) {
+    return null;
+  }
+  const stages: StageKey[] = [];
+  if (
+    workflowSteps.includes("script_review") ||
+    workflowSteps.includes("storyboard_review") ||
+    workflowSteps.includes("image_review")
+  ) {
+    stages.push("review");
+  }
+  if (workflowSteps.includes("script_review")) {
+    stages.push("script");
+  }
+  if (workflowSteps.includes("storyboard_review")) {
+    stages.push("storyboard");
+  }
+  if (workflowSteps.includes("image_review")) {
+    stages.push("images");
+  }
+  return stages;
 }

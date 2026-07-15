@@ -1,7 +1,7 @@
 import { ImageReviewClient, type ImageReviewPayload } from "@/components/image-review-client";
 import { ReviewUnavailable } from "@/components/review-unavailable";
 import { StageHeader } from "@/components/stage-header";
-import { getReviewStatuses, getStageData } from "@/lib/review-store";
+import { getProjectArtifactOverview, getReviewStatuses, getStageData } from "@/lib/review-store";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
@@ -19,6 +19,7 @@ export default async function ImageReviewPage({ params }: Props) {
       getStageData(videoId, version, "script").catch(() => null),
       getStageData(videoId, version, "storyboard").catch(() => null),
     ]);
+    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     const title = initial.artifact[0]?.title;
     const reviewStatuses = {
       ...(await getReviewStatuses(videoId, version)),
@@ -32,6 +33,7 @@ export default async function ImageReviewPage({ params }: Props) {
           title={title}
           active="images"
           reviewStatuses={reviewStatuses}
+          workflowSteps={overview?.workflowSteps}
         />
         <ImageReviewClient
           videoId={videoId}
@@ -45,6 +47,7 @@ export default async function ImageReviewPage({ params }: Props) {
       </main>
     );
   } catch (error) {
+    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     return (
       <ReviewUnavailable
         videoId={videoId}
@@ -52,6 +55,7 @@ export default async function ImageReviewPage({ params }: Props) {
         active="images"
         stageLabel="图片审核"
         error={error}
+        overview={overview ?? undefined}
       />
     );
   }

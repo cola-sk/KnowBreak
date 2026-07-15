@@ -5,7 +5,7 @@ import {
 import { ReviewUnavailable } from "@/components/review-unavailable";
 import { StageHeader } from "@/components/stage-header";
 import { readProfileBase, readProfileOverrides } from "@/lib/profile-server";
-import { getProductionReviewData } from "@/lib/review-store";
+import { getProductionReviewData, getProjectArtifactOverview } from "@/lib/review-store";
 import { readTtsRuntimeDefaults } from "@/lib/tts-settings-server";
 
 interface Props {
@@ -32,6 +32,7 @@ export default async function ProductionReviewPage({ params }: Props) {
           title={initial.title}
           active="review"
           reviewStatuses={reviewStatuses}
+          workflowSteps={initial.workflowSteps}
         />
         <ProductionReviewClient
           initial={initial}
@@ -42,6 +43,7 @@ export default async function ProductionReviewPage({ params }: Props) {
       </main>
     );
   } catch (error) {
+    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     return (
       <ReviewUnavailable
         videoId={videoId}
@@ -49,6 +51,7 @@ export default async function ProductionReviewPage({ params }: Props) {
         active="review"
         stageLabel="成片审核"
         error={error}
+        overview={overview ?? undefined}
       />
     );
   }

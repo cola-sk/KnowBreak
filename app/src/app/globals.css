@@ -1924,10 +1924,6 @@ a.tab.active {
   gap: 18px;
 }
 
-.task-shell {
-  max-width: 1800px;
-}
-
 .task-list {
   display: grid;
   gap: 8px;
@@ -2309,6 +2305,102 @@ a.tab.active {
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.artifact-overview-panel {
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.artifact-overview-head,
+.artifact-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.artifact-overview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.artifact-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: 8px;
+}
+
+.artifact-stage-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: light-dark(#f8fafc, rgba(255, 255, 255, 0.02));
+  display: grid;
+  gap: 5px;
+}
+
+.artifact-stage-card.done {
+  border-color: var(--success-border);
+  background: var(--success-light);
+}
+
+.artifact-stage-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.artifact-stage-file {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.artifact-section {
+  display: grid;
+  gap: 10px;
+}
+
+.artifact-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.artifact-summary-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--panel);
+  display: grid;
+  gap: 7px;
+}
+
+.artifact-summary-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.artifact-summary-card p,
+.artifact-summary-meta {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.artifact-script-preview {
+  margin-left: 18px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .compact-stage-strip {

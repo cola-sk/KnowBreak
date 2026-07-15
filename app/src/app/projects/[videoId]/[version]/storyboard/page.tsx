@@ -4,7 +4,7 @@ import {
   StoryboardReviewClient,
   type StoryboardReviewPayload,
 } from "@/components/storyboard-review-client";
-import { getReviewStatuses, getStageData } from "@/lib/review-store";
+import { getProjectArtifactOverview, getReviewStatuses, getStageData } from "@/lib/review-store";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
@@ -18,6 +18,7 @@ export default async function StoryboardReviewPage({ params }: Props) {
       version,
       "storyboard",
     )) as StoryboardReviewPayload;
+    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     const title = initial.artifact.storyboards[0]?.title;
     const reviewStatuses = {
       ...(await getReviewStatuses(videoId, version)),
@@ -31,11 +32,13 @@ export default async function StoryboardReviewPage({ params }: Props) {
           title={title}
           active="storyboard"
           reviewStatuses={reviewStatuses}
+          workflowSteps={overview?.workflowSteps}
         />
         <StoryboardReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );
   } catch (error) {
+    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     return (
       <ReviewUnavailable
         videoId={videoId}
@@ -43,6 +46,7 @@ export default async function StoryboardReviewPage({ params }: Props) {
         active="storyboard"
         stageLabel="分镜审核"
         error={error}
+        overview={overview ?? undefined}
       />
     );
   }

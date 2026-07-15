@@ -1,7 +1,7 @@
 import { ReviewUnavailable } from "@/components/review-unavailable";
 import { ScriptReviewClient, type ScriptReviewPayload } from "@/components/script-review-client";
 import { StageHeader } from "@/components/stage-header";
-import { getReviewStatuses, getStageData } from "@/lib/review-store";
+import { getProjectArtifactOverview, getReviewStatuses, getStageData } from "@/lib/review-store";
 
 interface Props {
   params: Promise<{ videoId: string; version: string }>;
@@ -15,6 +15,7 @@ export default async function ScriptReviewPage({ params }: Props) {
       version,
       "script",
     )) as ScriptReviewPayload;
+    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     const title = initial.artifact.scripts[0]?.title;
     const reviewStatuses = {
       ...(await getReviewStatuses(videoId, version)),
@@ -28,11 +29,13 @@ export default async function ScriptReviewPage({ params }: Props) {
           title={title}
           active="script"
           reviewStatuses={reviewStatuses}
+          workflowSteps={overview?.workflowSteps}
         />
         <ScriptReviewClient videoId={videoId} version={version} initial={initial} />
       </main>
     );
   } catch (error) {
+    const overview = await getProjectArtifactOverview(videoId, version).catch(() => null);
     return (
       <ReviewUnavailable
         videoId={videoId}
@@ -40,6 +43,7 @@ export default async function ScriptReviewPage({ params }: Props) {
         active="script"
         stageLabel="脚本审核"
         error={error}
+        overview={overview ?? undefined}
       />
     );
   }
