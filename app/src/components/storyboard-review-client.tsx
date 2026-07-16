@@ -49,10 +49,15 @@ function statusClass(status: string): string {
   return "badge";
 }
 
+function reindexShots(shots: Shot[]): Shot[] {
+  return shots.map((shot, index) => ({ ...shot, index }));
+}
+
 export function StoryboardReviewClient({ videoId, version, initial, readOnly = false }: Props) {
   const [data, setData] = useState<StoryboardReviewPayload>(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [undoStack, setUndoStack] = useState<StoryboardReviewPayload[]>([]);
 
   const totalShots = useMemo(
     () => data.artifact.storyboards.reduce((acc, item) => acc + item.shots.length, 0),
@@ -98,6 +103,74 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
     });
   };
 
+  const pushUndo = () => {
+    setUndoStack((prev) => [data, ...prev].slice(0, 20));
+  };
+
+  const restoreLast = () => {
+    const previous = undoStack[0];
+    if (!previous) {
+      return;
+    }
+    setData(previous);
+    setUndoStack((prev) => prev.slice(1));
+    setMessage("已撤销上一处新增/删除。");
+  };
+
+  const addShot = (boardIndex: number, afterIndex: number | null = null) => {
+    if (readOnly) {
+      return;
+    }
+    pushUndo();
+    setData((prev) => ({
+      ...prev,
+      artifact: {
+        ...prev.artifact,
+        storyboards: prev.artifact.storyboards.map((board, bIdx) => {
+          if (bIdx !== boardIndex) {
+            return board;
+          }
+          const insertAt = afterIndex === null ? board.shots.length : afterIndex + 1;
+          const base = afterIndex === null ? board.shots.at(-1) : board.shots[afterIndex];
+          const narration = base?.narration ?? "";
+          const nextShots = reindexShots([
+            ...board.shots.slice(0, insertAt),
+            {
+              index: insertAt,
+              narration,
+              visual: "",
+              broll: "",
+              subtitle: narration,
+              duration: base?.duration ?? 3,
+            },
+            ...board.shots.slice(insertAt),
+          ]);
+          return { ...board, shots: nextShots };
+        }),
+      },
+    }));
+    setMessage("已新增一条分镜，保存后生效。");
+  };
+
+  const deleteShot = (boardIndex: number, shotIndex: number) => {
+    if (readOnly) {
+      return;
+    }
+    pushUndo();
+    setData((prev) => ({
+      ...prev,
+      artifact: {
+        ...prev.artifact,
+        storyboards: prev.artifact.storyboards.map((board, bIdx) =>
+          bIdx === boardIndex
+            ? { ...board, shots: reindexShots(board.shots.filter((_, sIdx) => sIdx !== shotIndex)) }
+            : board,
+        ),
+      },
+    }));
+    setMessage("已删除一条分镜，可撤销；保存后生效。");
+  };
+
   const save = async () => {
     setSaving(true);
     setMessage("");
@@ -106,7 +179,13 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          artifact: data.artifact,
+          artifact: {
+            ...data.artifact,
+            storyboards: data.artifact.storyboards.map((board) => ({
+              ...board,
+              shots: reindexShots(board.shots),
+            })),
+          },
           review: { status: "in_review" },
         }),
       });
@@ -115,6 +194,7 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
         throw new Error("error" in next ? next.error : "保存失败");
       }
       setData(next as StoryboardReviewPayload);
+      setUndoStack([]);
       setMessage("分镜已保存。可继续编辑，或点击“通过分镜审核”。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
@@ -127,6 +207,26 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
     setSaving(true);
     setMessage("");
     try {
+      const saveResponse = await fetch(`/api/projects/${videoId}/${version}/storyboard`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifact: {
+            ...data.artifact,
+            storyboards: data.artifact.storyboards.map((board) => ({
+              ...board,
+              shots: reindexShots(board.shots),
+            })),
+          },
+          review: { status: "in_review" },
+        }),
+      });
+      const saved = (await saveResponse.json()) as StoryboardReviewPayload | { error: string };
+      if (!saveResponse.ok) {
+        throw new Error("error" in saved ? saved.error : "保存失败");
+      }
+      const savedPayload = saved as StoryboardReviewPayload;
+
       const response = await fetch(
         `/api/projects/${videoId}/${version}/reviews/storyboard_review/approve`,
         { method: "POST" },
@@ -135,8 +235,9 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
       if (!response.ok || !result.review) {
         throw new Error(result.error ?? "通过失败");
       }
-      setData((prev) => ({ ...prev, review: result.review! }));
-      setMessage("分镜审核已通过。你可以进入图片审核阶段。");
+      setData({ ...savedPayload, review: result.review });
+      setUndoStack([]);
+      setMessage("分镜已保存并审核通过。你可以进入图片审核阶段。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "通过失败");
     } finally {
@@ -166,6 +267,9 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
           <button className="secondary" disabled={saving} onClick={save}>
             保存分镜
           </button>
+          <button className="secondary" disabled={saving || undoStack.length === 0} onClick={restoreLast}>
+            撤销新增/删除
+          </button>
           {data.review.status === "approved" ? (
             <span className="approved-pill">已通过</span>
           ) : (
@@ -189,10 +293,18 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
             </div>
 
             <div style={{ overflowX: "auto", marginTop: 10 }}>
+              {!readOnly ? (
+                <div className="row" style={{ justifyContent: "flex-end", marginBottom: 8 }}>
+                  <button className="secondary compact-btn" disabled={saving} onClick={() => addShot(bIdx)}>
+                    末尾新增分镜
+                  </button>
+                </div>
+              ) : null}
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left" }}>镜头</th>
+                    {!readOnly ? <th style={{ textAlign: "left" }}>操作</th> : null}
                     <th style={{ textAlign: "left" }}>旁白</th>
                     <th style={{ textAlign: "left" }}>画面</th>
                     <th style={{ textAlign: "left" }}>B-roll</th>
@@ -204,6 +316,18 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
                   {board.shots.map((shot, sIdx) => (
                     <tr key={shot.index}>
                       <td style={{ verticalAlign: "top", padding: "8px 6px", width: 80 }}>{shot.index}</td>
+                      {!readOnly ? (
+                        <td style={{ verticalAlign: "top", padding: "8px 6px", width: 142 }}>
+                          <div className="row" style={{ gap: 6 }}>
+                            <button className="secondary compact-btn" disabled={saving} onClick={() => addShot(bIdx, sIdx)}>
+                              下方新增
+                            </button>
+                            <button className="warn compact-btn" disabled={saving} onClick={() => deleteShot(bIdx, sIdx)}>
+                              删除
+                            </button>
+                          </div>
+                        </td>
+                      ) : null}
                       <td style={{ padding: "8px 6px" }}>
                         <textarea
                           value={shot.narration}

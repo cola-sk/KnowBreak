@@ -52,6 +52,7 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
   const [data, setData] = useState<ScriptReviewPayload>(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>("");
+  const [undoStack, setUndoStack] = useState<ScriptReviewPayload[]>([]);
 
   const totalLines = useMemo(
     () => data.artifact.scripts.reduce((acc, script) => acc + script.lines.length, 0),
@@ -99,6 +100,74 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
     }));
   };
 
+  const pushUndo = () => {
+    setUndoStack((prev) => [data, ...prev].slice(0, 20));
+  };
+
+  const restoreLast = () => {
+    const previous = undoStack[0];
+    if (!previous) {
+      return;
+    }
+    setData(previous);
+    setUndoStack((prev) => prev.slice(1));
+    setMessage("已撤销上一处新增/删除。");
+  };
+
+  const recalcDuration = (lines: ScriptLine[]): number =>
+    Number(lines.reduce((acc, line) => acc + (Number(line.estimated_seconds) || 0), 0).toFixed(1));
+
+  const addLine = (scriptIndex: number, afterIndex: number | null = null) => {
+    if (readOnly) {
+      return;
+    }
+    pushUndo();
+    setData((prev) => ({
+      ...prev,
+      artifact: {
+        ...prev.artifact,
+        scripts: prev.artifact.scripts.map((script, sIdx) => {
+          if (sIdx !== scriptIndex) {
+            return script;
+          }
+          const insertAt = afterIndex === null ? script.lines.length : afterIndex + 1;
+          const base = afterIndex === null ? script.lines.at(-1) : script.lines[afterIndex];
+          const nextLines = [
+            ...script.lines.slice(0, insertAt),
+            {
+              text: "",
+              estimated_seconds: base?.estimated_seconds ?? 3,
+            },
+            ...script.lines.slice(insertAt),
+          ];
+          return { ...script, lines: nextLines, total_duration: recalcDuration(nextLines) };
+        }),
+      },
+    }));
+    setMessage("已新增一条脚本行，保存后生效。");
+  };
+
+  const deleteLine = (scriptIndex: number, lineIndex: number) => {
+    if (readOnly) {
+      return;
+    }
+    pushUndo();
+    setData((prev) => ({
+      ...prev,
+      artifact: {
+        ...prev.artifact,
+        scripts: prev.artifact.scripts.map((script, sIdx) => {
+          if (sIdx !== scriptIndex) {
+            return script;
+          }
+          const nextLines = script.lines.filter((_, lIdx) => lIdx !== lineIndex);
+          return { ...script, lines: nextLines, total_duration: recalcDuration(nextLines) };
+        }),
+      },
+    }));
+    setMessage("已删除一条脚本行，可撤销；保存后生效。");
+  };
+
   const save = async () => {
     setSaving(true);
     setMessage("");
@@ -116,6 +185,7 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
         throw new Error("error" in next ? next.error : "保存失败");
       }
       setData(next as ScriptReviewPayload);
+      setUndoStack([]);
       setMessage("脚本已保存。可继续编辑，或点击“通过脚本审核”。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
@@ -152,6 +222,7 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
         throw new Error(result.error ?? "通过失败");
       }
       setData({ ...savedPayload, review: result.review });
+      setUndoStack([]);
       setMessage("脚本已保存并审核通过。你可以进入分镜审核阶段。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "通过失败");
@@ -181,6 +252,9 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
         <div className="row" style={{ marginTop: 12 }}>
           <button className="secondary" disabled={saving} onClick={save}>
             保存脚本
+          </button>
+          <button className="secondary" disabled={saving || undoStack.length === 0} onClick={restoreLast}>
+            撤销新增/删除
           </button>
           {data.review.status === "approved" ? (
             <span className="approved-pill">已通过</span>
@@ -231,8 +305,28 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
             </div>
 
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+              {!readOnly ? (
+                <div className="row" style={{ justifyContent: "flex-end" }}>
+                  <button className="secondary compact-btn" disabled={saving} onClick={() => addLine(sIdx)}>
+                    末尾新增脚本行
+                  </button>
+                </div>
+              ) : null}
               {script.lines.map((line, lIdx) => (
                 <div key={lIdx} style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: 10 }}>
+                  {!readOnly ? (
+                    <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+                      <span className="badge">line {lIdx + 1}</span>
+                      <div className="row">
+                        <button className="secondary compact-btn" disabled={saving} onClick={() => addLine(sIdx, lIdx)}>
+                          下方新增
+                        </button>
+                        <button className="warn compact-btn" disabled={saving} onClick={() => deleteLine(sIdx, lIdx)}>
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 130px", gap: 8 }}>
                     <textarea
                       value={line.text}

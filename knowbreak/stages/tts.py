@@ -45,7 +45,7 @@ def _get_tts_config_dict(cfg: Config, provider: str) -> dict:
             "speaker": cfg.tts.volc_speaker,
             "context": cfg.tts.volc_context,
             "sample_rate": cfg.tts.volc_sample_rate,
-            "speech_rate": cfg.tts.volc_speech_rate,
+            "speech_rate": _volc_speech_rate(cfg),
             "loudness_rate": cfg.tts.volc_loudness_rate,
             "pitch_rate": cfg.tts.volc_pitch_rate,
         })
@@ -78,7 +78,8 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
     if provider == "volcengine":
         print(
             "  TTS config: "
-            f"provider=volcengine, model={cfg.tts.volc_model}, speaker={cfg.tts.volc_speaker}"
+            f"provider=volcengine, model={cfg.tts.volc_model}, "
+            f"speaker={cfg.tts.volc_speaker}, speech_rate={_volc_speech_rate(cfg)}"
         )
     else:
         print(f"  TTS config: provider={provider}, voice={cfg.tts.voice}")
@@ -163,10 +164,21 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
         line_audios: list[TTSLine] = []
         for i, line in enumerate(script.lines):
             mp3 = script_dir / f"line_{i:03d}.mp3"
+            line_text = (line.text or "").strip()
+            if not line_text:
+                dur = _silent_duration(line.estimated_seconds)
+                _synth_silence(mp3, dur)
+                line_audios.append(TTSLine(
+                    index=i,
+                    text="",
+                    audio_path=str(mp3.relative_to(cfg.out_dir)),
+                    duration=dur,
+                ))
+                continue
 
             # Compute cache key based on text and provider config
             prov_config = _get_tts_config_dict(cfg, provider)
-            cache_key = _get_hash(line.text, prov_config)
+            cache_key = _get_hash(line_text, prov_config)
 
             cached_item = cache_index.get(cache_key)
             cached_file = cache_dir / f"{cache_key}.mp3"
@@ -177,7 +189,7 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
                 dur = cached_item["duration"]
                 print(f"  ✓ [TTS Cache Hit] topic {script.topic_index} line {i}: {actual_provider} (duration: {dur}s)")
             else:
-                actual_provider = _synth(line.text, mp3, cfg, provider)
+                actual_provider = _synth(line_text, mp3, cfg, provider)
                 dur = _probe_duration(mp3)
 
                 if actual_provider == provider:
@@ -185,7 +197,7 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
                     shutil.copy(mp3, cached_file)
                     # Update index
                     cache_index[cache_key] = {
-                        "text": line.text,
+                        "text": line_text,
                         "requested_provider": provider,
                         "actual_provider": actual_provider,
                         "duration": dur,
@@ -202,7 +214,7 @@ def run(scripts_path: Path, cfg: Config) -> TTSResult:
 
             line_audios.append(TTSLine(
                 index=i,
-                text=line.text,
+                text=line_text,
                 audio_path=str(mp3.relative_to(cfg.out_dir)),
                 duration=dur,
             ))
@@ -257,6 +269,34 @@ def _synth(text: str, out_path: Path, cfg: Config, provider: str) -> str:
     return provider
 
 
+def _silent_duration(value: float | int | None) -> float:
+    try:
+        duration = float(value or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    return max(0.1, duration)
+
+
+def _synth_silence(out_path: Path, duration: float) -> None:
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono",
+            "-t",
+            f"{duration:.3f}",
+            "-c:a",
+            "libmp3lame",
+            str(out_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
 def _synth_edge(text: str, out_path: Path, cfg: Config) -> None:
     asyncio.run(_synth_edge_async(text, out_path, cfg))
 
@@ -302,7 +342,7 @@ def _synth_volcengine(text: str, out_path: Path, cfg: Config) -> None:
             "audio_params": {
                 "format": "mp3",
                 "sample_rate": cfg.tts.volc_sample_rate,
-                "speech_rate": cfg.tts.volc_speech_rate,
+                "speech_rate": _volc_speech_rate(cfg),
                 "loudness_rate": cfg.tts.volc_loudness_rate,
                 "pitch_rate": cfg.tts.volc_pitch_rate,
             },
@@ -332,6 +372,12 @@ def _synth_volcengine(text: str, out_path: Path, cfg: Config) -> None:
     if not audio_chunks:
         raise RuntimeError("火山 Seed TTS 响应缺少音频数据")
     out_path.write_bytes(b"".join(audio_chunks))
+
+
+def _volc_speech_rate(cfg: Config) -> int:
+    if cfg.tts.volc_speech_rate != 0:
+        return cfg.tts.volc_speech_rate
+    return max(-50, min(100, int(round((cfg.tts.speed - 1.0) * 100))))
 
 
 def _parse_volcengine_chunk(line: str | bytes) -> bytes | None:

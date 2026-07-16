@@ -1168,6 +1168,12 @@ interface MutableImageEntry {
   height?: number;
 }
 
+interface LocateImageEntryOptions {
+  videoId: string;
+  version: string;
+  createIfMissing?: boolean;
+}
+
 interface ParsedImageItemId {
   topicIndex: number;
   shotIndex?: number;
@@ -1193,7 +1199,34 @@ function parseImageItemId(itemId: string): ParsedImageItemId {
   throw new Error(`Invalid image review item id: ${itemId}`);
 }
 
-function locateImageEntry(artifact: unknown, itemId: string): MutableImageEntry {
+function imageEntryPath(videoId: string, version: string, topicIndex: number, parsed: ParsedImageItemId): string {
+  if (parsed.isCover) {
+    return `${videoId}/${version}/images/${topicIndex}/cover.jpg`;
+  }
+  return `${videoId}/${version}/images/${topicIndex}/shot_${String(parsed.shotIndex ?? 0).padStart(3, "0")}.jpg`;
+}
+
+function createPendingImageEntry(
+  videoId: string,
+  version: string,
+  topicIndex: number,
+  parsed: ParsedImageItemId,
+): MutableImageEntry & { shot_index?: number } {
+  return {
+    ...(parsed.isCover ? {} : { shot_index: parsed.shotIndex }),
+    image_path: imageEntryPath(videoId, version, topicIndex, parsed),
+    provider: "pending",
+    mode: "",
+    query: "",
+    prompt: "",
+    source_url: "",
+    creator: "",
+    license: "",
+    model: "",
+  };
+}
+
+function locateImageEntry(artifact: unknown, itemId: string, options?: LocateImageEntryOptions): MutableImageEntry {
   if (!Array.isArray(artifact)) {
     throw new Error("images artifact is not an array");
   }
@@ -1214,14 +1247,29 @@ function locateImageEntry(artifact: unknown, itemId: string): MutableImageEntry 
 
     if (parsed.isCover) {
       if (!typedTopic.cover || typeof typedTopic.cover !== "object") {
+        if (options?.createIfMissing) {
+          typedTopic.cover = createPendingImageEntry(options.videoId, options.version, parsed.topicIndex, parsed);
+          return typedTopic.cover;
+        }
         throw new Error(`Cover not found for ${itemId}`);
       }
       return typedTopic.cover;
     }
 
     const shots = Array.isArray(typedTopic.shots) ? typedTopic.shots : [];
+    if (!Array.isArray(typedTopic.shots)) {
+      typedTopic.shots = shots;
+    }
     const targetShot = shots.find((shot) => shot.shot_index === parsed.shotIndex);
     if (!targetShot) {
+      if (options?.createIfMissing) {
+        const created = createPendingImageEntry(options.videoId, options.version, parsed.topicIndex, parsed) as {
+          shot_index?: number;
+        } & MutableImageEntry;
+        shots.push(created);
+        shots.sort((left, right) => (left.shot_index ?? 0) - (right.shot_index ?? 0));
+        return created;
+      }
       throw new Error(`Shot not found for ${itemId}`);
     }
     return targetShot;
@@ -1247,7 +1295,7 @@ export async function replaceImageForReviewItem(
   imageData: Uint8Array,
 ): Promise<{ artifact: unknown; review: ReviewFile; imagePath: string }> {
   const { artifact, review } = await getStageData(videoId, version, "images");
-  const entry = locateImageEntry(artifact, itemId);
+  const entry = locateImageEntry(artifact, itemId, { videoId, version, createIfMissing: true });
   const relativeImagePath = entry.image_path;
   if (!relativeImagePath) {
     throw new Error(`Image path missing for ${itemId}`);
@@ -1273,6 +1321,13 @@ export async function replaceImageForReviewItem(
       notes: item.notes || "Replaced by reviewer upload",
     };
   });
+  if (!patchedItems.some((item) => item.id === itemId)) {
+    patchedItems.push({
+      id: itemId,
+      status: "modified",
+      notes: "Replaced by reviewer upload",
+    });
+  }
 
   const updated = await updateStageData(videoId, version, "images", {
     artifact,
@@ -1309,7 +1364,7 @@ export async function replaceImageWithGeneratedImageForReviewItem(
   metadata: GeneratedImageMetadata,
 ): Promise<{ artifact: unknown; review: ReviewFile; imagePath: string }> {
   const { artifact, review } = await getStageData(videoId, version, "images");
-  const entry = locateImageEntry(artifact, itemId);
+  const entry = locateImageEntry(artifact, itemId, { videoId, version, createIfMissing: true });
   const relativeImagePath = entry.image_path;
   if (!relativeImagePath) {
     throw new Error(`Image path missing for ${itemId}`);
@@ -1340,6 +1395,13 @@ export async function replaceImageWithGeneratedImageForReviewItem(
       notes: item.notes || "Replaced by AI generation",
     };
   });
+  if (!patchedItems.some((item) => item.id === itemId)) {
+    patchedItems.push({
+      id: itemId,
+      status: "regenerated",
+      notes: "Replaced by AI generation",
+    });
+  }
 
   const updated = await updateStageData(videoId, version, "images", {
     artifact,

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ImageCropDialog, type CropEditorState } from "@/components/image-crop-dialog";
 import { countOverrideLeaves, deepMerge, ProjectProfileConfigModal } from "@/components/profile-editor";
 import { readImageFileFromClipboard } from "@/lib/clipboard-image";
 import { buildContextualImagePrompt } from "@/lib/image-generation-prompt";
@@ -118,13 +119,6 @@ interface Props {
   imageDefaults: ImageRuntimeDefaults;
 }
 
-interface CropEditorState {
-  itemId: string;
-  title: string;
-  objectUrl: string;
-  fileName: string;
-}
-
 type PromptSource = "visual" | "narration" | "script" | "query" | "prompt" | "title" | "fallback";
 
 interface PromptSources {
@@ -169,21 +163,6 @@ interface LightboxState {
   title: string;
   src: string;
 }
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface Size {
-  width: number;
-  height: number;
-}
-
-const VIEWPORT_SIZE: Size = {
-  width: 360,
-  height: 640,
-};
 
 const IMAGE_PROVIDER_OPTIONS = [
   { value: "pollinations", label: "Pollinations", defaultModel: "" },
@@ -302,20 +281,104 @@ function isImageFile(file: File): boolean {
   return file.type.startsWith("image/");
 }
 
-function minCoverScale(size: Size): number {
-  return Math.max(VIEWPORT_SIZE.width / size.width, VIEWPORT_SIZE.height / size.height);
+function shotImagePath(videoId: string, version: string, topicIndex: number, shotIndex: number): string {
+  return `${videoId}/${version}/images/${topicIndex}/shot_${String(shotIndex).padStart(3, "0")}.jpg`;
 }
 
-function clampOffset(offset: Point, size: Size, scale: number): Point {
-  const displayWidth = size.width * scale;
-  const displayHeight = size.height * scale;
-  const maxX = Math.max(0, (displayWidth - VIEWPORT_SIZE.width) / 2);
-  const maxY = Math.max(0, (displayHeight - VIEWPORT_SIZE.height) / 2);
-
+function createPendingShotImage(videoId: string, version: string, topicIndex: number, shotIndex: number): ShotImageEntry {
   return {
-    x: Math.max(-maxX, Math.min(maxX, offset.x)),
-    y: Math.max(-maxY, Math.min(maxY, offset.y)),
+    shot_index: shotIndex,
+    image_path: shotImagePath(videoId, version, topicIndex, shotIndex),
+    provider: "pending",
+    mode: "",
+    query: "",
+    prompt: "",
+    source_url: "",
+    creator: "",
+    license: "",
+    model: "",
   };
+}
+
+function reindexStoryboardShots(shots: Shot[]): Shot[] {
+  return shots.map((shot, index) => ({ ...shot, index }));
+}
+
+function findRowImage(images: TopicImages | null | undefined, shot: Shot | null, rowIndex: number): ShotImageEntry | null {
+  if (!images) {
+    return null;
+  }
+  return (
+    (shot ? images.shots.find((item) => item.shot_index === shot.index) : null)
+    ?? images.shots.find((item) => item.shot_index === rowIndex)
+    ?? null
+  );
+}
+
+function normalizeShotImagesForRows(
+  videoId: string,
+  version: string,
+  topic: TopicImages,
+  board: StoryboardItem | null,
+  rowCount: number,
+): ShotImageEntry[] {
+  return Array.from({ length: rowCount }, (_, rowIndex) => {
+    const shot = board?.shots[rowIndex] ?? null;
+    const source = findRowImage(topic, shot, rowIndex)
+      ?? topic.shots[rowIndex]
+      ?? createPendingShotImage(videoId, version, topic.topic_index, rowIndex);
+    return {
+      ...source,
+      shot_index: rowIndex,
+      image_path: source.image_path || shotImagePath(videoId, version, topic.topic_index, rowIndex),
+    };
+  });
+}
+
+function normalizeArtifactsForTimeline(
+  artifacts: ProductionReviewPayload["artifacts"],
+  videoId: string,
+  version: string,
+): ProductionReviewPayload["artifacts"] {
+  const nextArtifacts = { ...artifacts };
+  const boardByTopic = new Map<number, StoryboardItem>();
+  const scriptLineCountByTopic = new Map<number, number>();
+
+  artifacts.script?.scripts.forEach((script) => {
+    scriptLineCountByTopic.set(script.topic_index, script.lines.length);
+  });
+
+  if (artifacts.storyboard) {
+    nextArtifacts.storyboard = {
+      ...artifacts.storyboard,
+      storyboards: artifacts.storyboard.storyboards.map((board) => {
+        const normalized = { ...board, shots: reindexStoryboardShots(board.shots) };
+        boardByTopic.set(board.topic_index, board);
+        return normalized;
+      }),
+    };
+  }
+
+  if (artifacts.images) {
+    nextArtifacts.images = artifacts.images.map((topic) => {
+      const originalBoard = boardByTopic.get(topic.topic_index)
+        ?? artifacts.storyboard?.storyboards.find((board) => board.topic_index === topic.topic_index)
+        ?? null;
+      const rowCount = Math.max(
+        scriptLineCountByTopic.get(topic.topic_index) ?? 0,
+        originalBoard?.shots.length ?? 0,
+      );
+      if (rowCount <= 0) {
+        return topic;
+      }
+      return {
+        ...topic,
+        shots: normalizeShotImagesForRows(videoId, version, topic, originalBoard, rowCount),
+      };
+    });
+  }
+
+  return nextArtifacts;
 }
 
 export function ProductionReviewClient({ initial, profileBase, globalOverrides, ttsDefaults, imageDefaults }: Props) {
@@ -342,6 +405,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
   const [jobNotice, setJobNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [dirtyStages, setDirtyStages] = useState<Set<ArtifactStage>>(() => new Set());
+  const [undoStack, setUndoStack] = useState<ProductionReviewPayload[]>([]);
   const previousJobRef = useRef<{ id: string; status: RegenerationJob["status"] } | null>(null);
 
   // Project overrides state
@@ -440,6 +504,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       setLastRefreshedAt(new Date().toISOString());
       setIsDirty(false);
       setDirtyStages(new Set());
+      setUndoStack([]);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "刷新失败");
     } finally {
@@ -500,6 +565,25 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       };
     });
     setMessage("");
+  };
+
+  const openEditorForExistingImage = async (itemId: string, title: string, imageSrc: string) => {
+    if (!imageSrc) {
+      setMessage("当前图片不存在，无法裁剪。");
+      return;
+    }
+    setMessage("");
+    try {
+      const response = await fetch(imageSrc, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("读取当前图片失败");
+      }
+      const blob = await response.blob();
+      const file = new File([blob], `${itemId}.jpg`, { type: blob.type || "image/jpeg" });
+      openEditorForFile(itemId, title, file);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取当前图片失败");
+    }
   };
 
   const replaceEditorSource = (file: File) => {
@@ -626,6 +710,25 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     });
   };
 
+  const pushUndo = () => {
+    setUndoStack((prev) => [data, ...prev].slice(0, 20));
+  };
+
+  const undoStructuralEdit = () => {
+    const previous = undoStack[0];
+    if (!previous) {
+      return;
+    }
+    setData(previous);
+    setUndoStack((prev) => prev.slice(1));
+    setIsDirty(true);
+    setDirtyStages(new Set(["script", "storyboard", "images"]));
+    setMessage("已撤销上一处新增/删除。");
+  };
+
+  const recalcScriptDuration = (lines: ScriptLine[]): number =>
+    Number(lines.reduce((acc, line) => acc + (Number(line.estimated_seconds) || 0), 0).toFixed(1));
+
   const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
     markDirty("script");
     setData((prev) => {
@@ -742,6 +845,156 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     });
   };
 
+  const addReviewRecord = (afterIndex: number | null = null) => {
+    pushUndo();
+    markDirty("script", "storyboard", "images");
+    setData((prev) => {
+      const nextArtifacts = { ...prev.artifacts };
+      const currentScript = prev.artifacts.script?.scripts.find((script) => script.topic_index === topicIndex) ?? null;
+      const currentBoard = prev.artifacts.storyboard?.storyboards.find((board) => board.topic_index === topicIndex) ?? null;
+      const insertAt = afterIndex === null
+        ? Math.max(currentScript?.lines.length ?? 0, currentBoard?.shots.length ?? 0)
+        : afterIndex + 1;
+      const newShotIndex = insertAt;
+
+      if (prev.artifacts.script) {
+        nextArtifacts.script = {
+          ...prev.artifacts.script,
+          scripts: prev.artifacts.script.scripts.map((script) => {
+            if (script.topic_index !== topicIndex) {
+              return script;
+            }
+            const base = afterIndex === null ? script.lines.at(-1) : script.lines[afterIndex];
+            const nextLines = [
+              ...script.lines.slice(0, insertAt),
+              { text: "", estimated_seconds: base?.estimated_seconds ?? 3 },
+              ...script.lines.slice(insertAt),
+            ];
+            return { ...script, lines: nextLines, total_duration: recalcScriptDuration(nextLines) };
+          }),
+        };
+      }
+
+      if (prev.artifacts.storyboard) {
+        nextArtifacts.storyboard = {
+          ...prev.artifacts.storyboard,
+          storyboards: prev.artifacts.storyboard.storyboards.map((board) => {
+            if (board.topic_index !== topicIndex) {
+              return board;
+            }
+            const base = afterIndex === null ? board.shots.at(-1) : board.shots[afterIndex];
+            const narration = base?.narration ?? "";
+            const nextShots = reindexStoryboardShots([
+              ...board.shots.slice(0, insertAt),
+              {
+                index: newShotIndex,
+                narration,
+                visual: "",
+                broll: "",
+                subtitle: narration,
+                duration: base?.duration ?? 3,
+              },
+              ...board.shots.slice(insertAt),
+            ]);
+            return { ...board, shots: nextShots };
+          }),
+        };
+      }
+
+      if (prev.artifacts.images) {
+        nextArtifacts.images = prev.artifacts.images.map((topic) => {
+          if (topic.topic_index !== topicIndex) {
+            return topic;
+          }
+          const oldRowCount = Math.max(
+            currentScript?.lines.length ?? 0,
+            currentBoard?.shots.length ?? 0,
+          );
+          const normalizedCurrent = normalizeShotImagesForRows(
+            prev.videoId,
+            prev.version,
+            topic,
+            currentBoard,
+            oldRowCount,
+          );
+          const nextShots = [
+            ...normalizedCurrent.slice(0, insertAt),
+            createPendingShotImage(prev.videoId, prev.version, topic.topic_index, insertAt),
+            ...normalizedCurrent.slice(insertAt),
+          ].map((shot, idx) => ({ ...shot, shot_index: idx }));
+          return {
+            ...topic,
+            shots: nextShots,
+          };
+        });
+      }
+
+      return { ...prev, artifacts: nextArtifacts };
+    });
+    setMessage("已新增一条脚本/分镜记录，保存后生效。");
+  };
+
+  const deleteReviewRecord = (recordIndex: number) => {
+    pushUndo();
+    markDirty("script", "storyboard", "images");
+    setData((prev) => {
+      const nextArtifacts = { ...prev.artifacts };
+      const targetShot = prev.artifacts.storyboard
+        ?.storyboards.find((board) => board.topic_index === topicIndex)
+        ?.shots[recordIndex];
+      const fallbackImage = prev.artifacts.images
+        ?.find((topic) => topic.topic_index === topicIndex)
+        ?.shots[recordIndex];
+      const targetShotIndex = targetShot?.index ?? fallbackImage?.shot_index;
+
+      if (prev.artifacts.script) {
+        nextArtifacts.script = {
+          ...prev.artifacts.script,
+          scripts: prev.artifacts.script.scripts.map((script) => {
+            if (script.topic_index !== topicIndex) {
+              return script;
+            }
+            const nextLines = script.lines.filter((_, idx) => idx !== recordIndex);
+            return { ...script, lines: nextLines, total_duration: recalcScriptDuration(nextLines) };
+          }),
+        };
+      }
+
+      if (prev.artifacts.storyboard) {
+        nextArtifacts.storyboard = {
+          ...prev.artifacts.storyboard,
+          storyboards: prev.artifacts.storyboard.storyboards.map((board) =>
+            board.topic_index === topicIndex
+              ? { ...board, shots: reindexStoryboardShots(board.shots.filter((_, idx) => idx !== recordIndex)) }
+              : board,
+          ),
+        };
+      }
+
+      if (prev.artifacts.images && targetShotIndex !== undefined) {
+        nextArtifacts.images = prev.artifacts.images.map((topic) => {
+          if (topic.topic_index !== topicIndex) {
+            return topic;
+          }
+          const nextTopic = {
+            ...topic,
+            shots: topic.shots.filter((shot) => shot.shot_index !== targetShotIndex),
+          };
+          const nextBoard = nextArtifacts.storyboard?.storyboards.find((board) => board.topic_index === topicIndex) ?? null;
+          const nextScript = nextArtifacts.script?.scripts.find((script) => script.topic_index === topicIndex) ?? null;
+          const rowCount = Math.max(nextScript?.lines.length ?? 0, nextBoard?.shots.length ?? 0);
+          return {
+            ...nextTopic,
+            shots: normalizeShotImagesForRows(prev.videoId, prev.version, nextTopic, nextBoard, rowCount),
+          };
+        });
+      }
+
+      return { ...prev, artifacts: nextArtifacts };
+    });
+    setMessage("已删除一条脚本/分镜记录，可撤销；保存后生效。");
+  };
+
   const updateImage = (
     kind: "cover" | "shot",
     shotIndex: number | undefined,
@@ -811,14 +1064,21 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     reviews: ProductionReviewPayload["reviews"];
   }> => {
     const nextReviews: Partial<Record<ReviewStage, ReviewFile>> = { ...data.reviews };
-    const nextArtifacts = { ...data.artifacts };
+    const normalizedArtifacts = normalizeArtifactsForTimeline(data.artifacts, data.videoId, data.version);
+    const nextArtifacts = { ...normalizedArtifacts };
     const stagesToSave = new Set(dirtyStages);
+    if (JSON.stringify(normalizedArtifacts.storyboard) !== JSON.stringify(data.artifacts.storyboard)) {
+      stagesToSave.add("storyboard");
+    }
+    if (JSON.stringify(normalizedArtifacts.images) !== JSON.stringify(data.artifacts.images)) {
+      stagesToSave.add("images");
+    }
 
-    if (data.artifacts.script && stagesToSave.has("script")) {
+    if (normalizedArtifacts.script && stagesToSave.has("script")) {
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/script`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ artifact: data.artifacts.script, review: { status: "in_review" } }),
+        body: JSON.stringify({ artifact: normalizedArtifacts.script, review: { status: "in_review" } }),
       });
       const payload = (await response.json()) as { artifact?: ScriptArtifact; review?: ReviewFile; error?: string };
       if (!response.ok || !payload.artifact || !payload.review) {
@@ -828,11 +1088,11 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       nextReviews.script_review = payload.review;
     }
 
-    if (data.artifacts.storyboard && stagesToSave.has("storyboard")) {
+    if (normalizedArtifacts.storyboard && stagesToSave.has("storyboard")) {
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/storyboard`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ artifact: data.artifacts.storyboard, review: { status: "in_review" } }),
+        body: JSON.stringify({ artifact: normalizedArtifacts.storyboard, review: { status: "in_review" } }),
       });
       const payload = (await response.json()) as { artifact?: StoryboardArtifact; review?: ReviewFile; error?: string };
       if (!response.ok || !payload.artifact || !payload.review) {
@@ -842,11 +1102,11 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       nextReviews.storyboard_review = payload.review;
     }
 
-    if (data.artifacts.images && stagesToSave.has("images")) {
+    if (normalizedArtifacts.images && stagesToSave.has("images")) {
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ artifact: data.artifacts.images, review: { status: "in_review" } }),
+        body: JSON.stringify({ artifact: normalizedArtifacts.images, review: { status: "in_review" } }),
       });
       const payload = (await response.json()) as { artifact?: TopicImages[]; review?: ReviewFile; error?: string };
       if (!response.ok || !payload.artifact || !payload.review) {
@@ -868,11 +1128,22 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       setMessage("已保存所有页面的修改。需要更新 MP4 时请选择阶段并点击重生成。");
       setIsDirty(false);
       setDirtyStages(new Set());
+      setUndoStack([]);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
     } finally {
       setSaving(false);
     }
+  };
+
+  const ensureEditsPersistedForImageMutation = async () => {
+    if (!isDirty && dirtyStages.size === 0) {
+      return;
+    }
+    await persistEdits();
+    setIsDirty(false);
+    setDirtyStages(new Set());
+    setUndoStack([]);
   };
 
   const approveProduction = async () => {
@@ -883,6 +1154,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
         await persistEdits();
         setIsDirty(false);
         setDirtyStages(new Set());
+        setUndoStack([]);
       }
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/actions`, {
         method: "POST",
@@ -909,6 +1181,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       setRuntimeOverrides(initial.runtimeOverrides ?? {});
       setIsDirty(false);
       setDirtyStages(new Set());
+      setUndoStack([]);
       setMessage("已放弃所有未保存的修改");
     }
   };
@@ -922,6 +1195,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     setReplacingItemId(editor.itemId);
     setMessage("");
     try {
+      await ensureEditsPersistedForImageMutation();
+
       const form = new FormData();
       form.append("itemId", editor.itemId);
       form.append("file", blob, "replacement.jpg");
@@ -1025,6 +1300,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
     setGeneratingItemId(generateEditor.itemId);
     setMessage("");
     try {
+      await ensureEditsPersistedForImageMutation();
+
       const response = await fetch(`/api/projects/${data.videoId}/${data.version}/images/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1071,6 +1348,8 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
         await persistEdits();
         setIsDirty(false);
         setDirtyStages(new Set());
+      } else if (!isDirty) {
+        await persistEdits();
       }
       if (runtimeOverrides.tts) {
         saveTtsHistoryItem(effectiveTtsSettings(ttsDefaults, runtimeOverrides));
@@ -1333,6 +1612,15 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
             >
               {saving ? "保存中..." : "保存全部修改 (所有 Topic)"}
             </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={saving || regenerating || undoStack.length === 0}
+              onClick={undoStructuralEdit}
+              style={{ padding: "6px 14px", fontSize: 13 }}
+            >
+              撤销新增/删除
+            </button>
             {isDirty ? (
               <button
                 type="button"
@@ -1357,8 +1645,11 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
           onScriptTitleChange={updateScriptTitle}
           onScriptCoverNarrationChange={updateScriptCoverNarration}
           onShotChange={updateShot}
+          onRecordAdd={addReviewRecord}
+          onRecordDelete={deleteReviewRecord}
           onImageChange={updateImage}
           onImageReplace={openEditorForFile}
+          onImageEdit={openEditorForExistingImage}
           onImageGenerate={openGenerateEditor}
           onImageDelete={deleteImage}
           onImageZoom={(title, src) => setLightbox({ title, src })}
@@ -1366,7 +1657,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
       </section>
 
       {editor ? (
-        <ImageCropModal
+        <ImageCropDialog
           editor={editor}
           busy={saving}
           onClose={closeEditor}
@@ -1427,8 +1718,11 @@ function GroupedTopicEditor({
   onScriptTitleChange,
   onScriptCoverNarrationChange,
   onShotChange,
+  onRecordAdd,
+  onRecordDelete,
   onImageChange,
   onImageReplace,
+  onImageEdit,
   onImageGenerate,
   onImageDelete,
   onImageZoom,
@@ -1443,8 +1737,11 @@ function GroupedTopicEditor({
   onScriptTitleChange: (value: string) => void;
   onScriptCoverNarrationChange: (value: string) => void;
   onShotChange: (shotIndex: number, key: keyof Shot, value: string) => void;
+  onRecordAdd: (afterIndex: number | null) => void;
+  onRecordDelete: (recordIndex: number) => void;
   onImageChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
   onImageReplace: (itemId: string, title: string, file: File) => void;
+  onImageEdit: (itemId: string, title: string, imageSrc: string) => void;
   onImageGenerate: (
     itemId: string,
     title: string,
@@ -1454,11 +1751,11 @@ function GroupedTopicEditor({
   onImageDelete: (kind: "cover" | "shot", shotIndex: number | undefined) => void;
   onImageZoom: (title: string, src: string) => void;
 }) {
-  const shotCount = Math.max(
+  const narrativeShotCount = Math.max(
     script?.lines.length ?? 0,
     board?.shots.length ?? 0,
-    images?.shots.length ?? 0,
   );
+  const shotCount = narrativeShotCount > 0 ? narrativeShotCount : images?.shots.length ?? 0;
 
   if (shotCount === 0 && !images?.cover) {
     return <div className="sub-panel" style={{ marginTop: 12 }}>未找到可审核的分镜信息。</div>;
@@ -1479,6 +1776,7 @@ function GroupedTopicEditor({
               replacing={replacingItemId === `topic_${images.topic_index}_cover`}
               generating={generatingItemId === `topic_${images.topic_index}_cover`}
               onReplace={(file) => onImageReplace(`topic_${images.topic_index}_cover`, "封面图片", file)}
+              onEdit={(src) => onImageEdit(`topic_${images.topic_index}_cover`, "封面图片", src)}
               onGenerate={() => onImageGenerate(
                 `topic_${images.topic_index}_cover`,
                 "封面图片",
@@ -1530,12 +1828,15 @@ function GroupedTopicEditor({
       {Array.from({ length: shotCount }, (_, idx) => {
         const line = script?.lines[idx] ?? null;
         const shot = board?.shots[idx] ?? null;
-        const image = shot
-          ? images?.shots.find((item) => item.shot_index === shot.index) ?? images?.shots[idx] ?? null
-          : images?.shots[idx] ?? null;
-        const displayIndex = shot?.index ?? image?.shot_index ?? idx;
-        const imageItemId = images && image
-          ? `topic_${images.topic_index}_shot_${image.shot_index}`
+        const image = findRowImage(images, shot, idx);
+        const displayIndex = idx;
+        const displayImage = image ? { ...image, shot_index: idx } : (
+          images && shot
+            ? createPendingShotImage("", "", images.topic_index, idx)
+            : null
+        );
+        const imageItemId = images && displayImage
+          ? `topic_${images.topic_index}_shot_${displayImage.shot_index}`
           : null;
 
         return (
@@ -1547,34 +1848,45 @@ function GroupedTopicEditor({
                   shot_index: {displayIndex} / line: {idx + 1}
                 </div>
               </div>
-              {shot ? (
-                <div style={{ width: 128 }}>
-                  <label style={{ fontSize: 12, color: "var(--muted)" }}>duration</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={shot.duration}
-                    onChange={(event) => onShotChange(idx, "duration", event.target.value)}
-                  />
+              <div className="row" style={{ alignItems: "flex-end", gap: 8 }}>
+                {shot ? (
+                  <div style={{ width: 128 }}>
+                    <label style={{ fontSize: 12, color: "var(--muted)" }}>duration</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={shot.duration}
+                      onChange={(event) => onShotChange(idx, "duration", event.target.value)}
+                    />
+                  </div>
+                ) : null}
+                <div className="row" style={{ gap: 6 }}>
+                  <button type="button" className="secondary compact-btn" onClick={() => onRecordAdd(idx)}>
+                    下方新增
+                  </button>
+                  <button type="button" className="warn compact-btn" onClick={() => onRecordDelete(idx)}>
+                    删除记录
+                  </button>
                 </div>
-              ) : null}
+              </div>
             </div>
 
             <div className="shot-card-body">
               <div className="shot-media-panel">
-                {image ? (
+                {displayImage ? (
                   <>
                     <ImageActionPanel
-                      image={image}
+                      image={displayImage}
                       imageToken={imageToken}
-                      title={`shot ${image.shot_index}`}
+                      title={`shot ${displayImage.shot_index}`}
                       itemId={imageItemId ?? `shot_${displayIndex}`}
                       replacing={Boolean(imageItemId && replacingItemId === imageItemId)}
                       generating={Boolean(imageItemId && generatingItemId === imageItemId)}
-                      onReplace={(file) => imageItemId && onImageReplace(imageItemId, `shot ${image.shot_index}`, file)}
+                      onReplace={(file) => imageItemId && onImageReplace(imageItemId, `shot ${displayImage.shot_index}`, file)}
+                      onEdit={(src) => imageItemId && onImageEdit(imageItemId, `shot ${displayImage.shot_index}`, src)}
                       onGenerate={() => imageItemId && onImageGenerate(
                         imageItemId,
-                        `shot ${image.shot_index}`,
+                        `shot ${displayImage.shot_index}`,
                         {
                           title: sourceText(script?.title ?? board?.title ?? images?.title),
                           visual: sourceText(shot?.visual),
@@ -1582,8 +1894,8 @@ function GroupedTopicEditor({
                           script: sourceText(line?.text),
                           broll: sourceText(shot?.broll),
                           subtitle: sourceText(shot?.subtitle),
-                          query: sourceText(image.query),
-                          prompt: sourceText(image.prompt),
+                          query: sourceText(displayImage.query),
+                          prompt: sourceText(displayImage.prompt),
                           fallback: [
                             shot?.visual,
                             shot?.broll,
@@ -1594,12 +1906,12 @@ function GroupedTopicEditor({
                         },
                         ["visual", "narration", "script", "query", "prompt", "fallback"],
                       )}
-                      onDelete={() => onImageDelete("shot", image.shot_index)}
-                      onZoom={(src) => onImageZoom(`shot ${image.shot_index}`, src)}
+                      onDelete={() => onImageDelete("shot", displayImage.shot_index)}
+                      onZoom={(src) => onImageZoom(`shot ${displayImage.shot_index}`, src)}
                     />
                     <div className="row" style={{ marginTop: 8 }}>
-                      <span className="badge">图片 shot {image.shot_index}</span>
-                      <span className="badge">{image.provider ?? "unknown"}</span>
+                      <span className="badge">图片 shot {displayImage.shot_index}</span>
+                      <span className="badge">{displayImage.provider ?? "unknown"}</span>
                     </div>
                   </>
                 ) : (
@@ -1642,16 +1954,16 @@ function GroupedTopicEditor({
                   )}
                 </div>
 
-                {image && imageItemId ? (
+                {displayImage && imageItemId ? (
                   <div className="field-group">
                     <details className="image-meta-details">
                       <summary className="field-group-title">图片信息</summary>
                     <ImageMetaEditor
-                      title={`shot ${image.shot_index}`}
-                      image={image}
+                      title={`shot ${displayImage.shot_index}`}
+                      image={displayImage}
                       imageToken={imageToken}
                       compact
-                      onChange={(key, value) => onImageChange("shot", image.shot_index, key, value)}
+                      onChange={(key, value) => onImageChange("shot", displayImage.shot_index, key, value)}
                     />
                     </details>
                   </div>
@@ -1661,6 +1973,11 @@ function GroupedTopicEditor({
           </section>
         );
       })}
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button type="button" className="secondary compact-btn" onClick={() => onRecordAdd(null)}>
+          末尾新增脚本/分镜记录
+        </button>
+      </div>
     </div>
   );
 }
@@ -1710,6 +2027,7 @@ function ImageActionPanel({
   replacing,
   generating,
   onReplace,
+  onEdit,
   onGenerate,
   onDelete,
   onZoom,
@@ -1721,6 +2039,7 @@ function ImageActionPanel({
   replacing: boolean;
   generating: boolean;
   onReplace: (file: File) => void;
+  onEdit: (src: string) => void;
   onGenerate: () => void;
   onDelete: () => void;
   onZoom: (src: string) => void;
@@ -1728,7 +2047,8 @@ function ImageActionPanel({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [pasteMessage, setPasteMessage] = useState("");
-  const imageSrc = image.image_path ? assetUrl(image.image_path, imageToken) : "";
+  const hasImageFile = Boolean(image.image_path && image.provider !== "pending");
+  const imageSrc = hasImageFile ? assetUrl(image.image_path, imageToken) : "";
 
   const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     const items = event.clipboardData.items;
@@ -1774,7 +2094,9 @@ function ImageActionPanel({
           />
         </button>
       ) : (
-        <div className="shot-empty-preview">图片已删除或未找到</div>
+        <div className="shot-empty-preview">
+          {image.provider === "pending" ? "新增分镜，待上传或生成图片" : "图片已删除或未找到"}
+        </div>
       )}
       <div className="image-action-toolbar">
         <input
@@ -1797,6 +2119,9 @@ function ImageActionPanel({
         <button type="button" className="secondary compact-btn" disabled={replacing} onClick={() => inputRef.current?.click()}>
           {replacing ? "替换中" : "上传"}
         </button>
+        <button type="button" className="secondary compact-btn" disabled={!imageSrc || replacing} onClick={() => onEdit(imageSrc)}>
+          裁剪
+        </button>
         <button type="button" className="secondary compact-btn" disabled={generating} onClick={onGenerate}>
           {generating ? "生成中" : "生图"}
         </button>
@@ -1806,7 +2131,7 @@ function ImageActionPanel({
         <button
           type="button"
           className="warn compact-btn"
-          disabled={!image.image_path}
+          disabled={!hasImageFile}
           onClick={() => {
             if (window.confirm("确认从当前成品审核中移除这张图片？不会删除磁盘原文件。")) {
               onDelete();
@@ -2029,260 +2354,6 @@ function ImageLightbox({ title, src, onClose }: { title: string; src: string; on
   );
 }
 
-interface ImageCropModalProps {
-  editor: CropEditorState;
-  busy: boolean;
-  onClose: () => void;
-  onSave: (blob: Blob) => Promise<void>;
-  onPickAnother: (file: File) => void;
-}
-
-function ImageCropModal({ editor, busy, onClose, onSave, onPickAnother }: ImageCropModalProps) {
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    startOffset: Point;
-  } | null>(null);
-
-  const [size, setSize] = useState<Size | null>(null);
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
-  const [localMessage, setLocalMessage] = useState("");
-
-  const minScale = useMemo(() => {
-    if (!size) {
-      return 1;
-    }
-    return minCoverScale(size);
-  }, [size]);
-
-  const maxScale = Math.max(minScale * 4, minScale + 0.1);
-
-  useEffect(() => {
-    setSize(null);
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-    setLocalMessage("");
-  }, [editor.objectUrl]);
-
-  const onImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    const natural: Size = {
-      width: event.currentTarget.naturalWidth,
-      height: event.currentTarget.naturalHeight,
-    };
-    const firstScale = minCoverScale(natural);
-    setSize(natural);
-    setScale(firstScale);
-    setOffset({ x: 0, y: 0 });
-  };
-
-  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!size) {
-      return;
-    }
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startOffset: offset,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!size || !dragRef.current || dragRef.current.pointerId !== event.pointerId) {
-      return;
-    }
-    const dx = event.clientX - dragRef.current.startX;
-    const dy = event.clientY - dragRef.current.startY;
-    setOffset(clampOffset({
-      x: dragRef.current.startOffset.x + dx,
-      y: dragRef.current.startOffset.y + dy,
-    }, size, scale));
-  };
-
-  const clearDragging = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) {
-      return;
-    }
-    dragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-
-  const updateScale = (nextScale: number) => {
-    if (!size) {
-      return;
-    }
-    setScale(nextScale);
-    setOffset((prev) => clampOffset(prev, size, nextScale));
-  };
-
-  const saveCropped = async () => {
-    if (!size || !imageRef.current) {
-      return;
-    }
-
-    setLocalMessage("");
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = 1080;
-      canvas.height = 1920;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        throw new Error("Canvas is not supported");
-      }
-
-      const displayWidth = size.width * scale;
-      const displayHeight = size.height * scale;
-      const left = (VIEWPORT_SIZE.width - displayWidth) / 2 + offset.x;
-      const top = (VIEWPORT_SIZE.height - displayHeight) / 2 + offset.y;
-      const cropWidth = VIEWPORT_SIZE.width / scale;
-      const cropHeight = VIEWPORT_SIZE.height / scale;
-      const sourceX = Math.max(0, Math.min((0 - left) / scale, size.width - cropWidth));
-      const sourceY = Math.max(0, Math.min((0 - top) / scale, size.height - cropHeight));
-
-      ctx.drawImage(
-        imageRef.current,
-        sourceX,
-        sourceY,
-        cropWidth,
-        cropHeight,
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-      );
-
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (value) => {
-            if (!value) {
-              reject(new Error("Failed to generate cropped image"));
-              return;
-            }
-            resolve(value);
-          },
-          "image/jpeg",
-          0.92,
-        );
-      });
-
-      await onSave(blob);
-    } catch (error) {
-      setLocalMessage(error instanceof Error ? error.message : "裁剪保存失败");
-    }
-  };
-
-  const pasteAnother = async () => {
-    setLocalMessage("");
-    try {
-      const file = await readImageFileFromClipboard();
-      if (!file) {
-        setLocalMessage("未读取到剪贴板图片。请先复制图片，再点击从剪贴板换图。");
-        return;
-      }
-      onPickAnother(file);
-    } catch {
-      setLocalMessage("浏览器未允许直接读取剪贴板。请按 Ctrl/Cmd + V，或选择本地图片。");
-    }
-  };
-
-  return (
-    <div className="crop-modal-backdrop">
-      <div className="panel crop-modal">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 18 }}>替换并裁剪：{editor.title}</div>
-            <div style={{ color: "var(--muted)", fontSize: 12 }}>
-              文件：{editor.fileName}。拖拽调整画面，或直接粘贴剪切板图片。
-            </div>
-          </div>
-          <button className="secondary" disabled={busy} onClick={onClose}>
-            关闭
-          </button>
-        </div>
-
-        <div className="crop-modal-grid">
-          <div>
-            <div
-              className="crop-viewport"
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={clearDragging}
-              onPointerCancel={clearDragging}
-            >
-              <img
-                ref={imageRef}
-                src={editor.objectUrl}
-                alt={editor.title}
-                onLoad={onImageLoad}
-                draggable={false}
-                style={{
-                  position: "absolute",
-                  top: "50%",
-                  left: "50%",
-                  width: size ? `${size.width * scale}px` : "auto",
-                  height: size ? `${size.height * scale}px` : "auto",
-                  transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px)`,
-                  userSelect: "none",
-                  pointerEvents: "none",
-                }}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: "grid", alignContent: "start", gap: 12 }}>
-            <div>
-              <label style={{ fontSize: 12, color: "var(--muted)" }}>缩放</label>
-              <input
-                type="range"
-                min={minScale}
-                max={maxScale}
-                step={(maxScale - minScale) / 200 || 0.01}
-                value={scale}
-                onChange={(event) => updateScale(Number(event.target.value))}
-                disabled={!size || busy}
-              />
-              <div style={{ color: "var(--muted)", fontSize: 12 }}>scale: {scale.toFixed(3)}</div>
-            </div>
-
-            <div className="row">
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  if (!file) {
-                    return;
-                  }
-                  onPickAnother(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-              <button className="secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
-                选择另一张图
-              </button>
-              <button className="secondary" disabled={busy} onClick={pasteAnother}>
-                从剪贴板换图
-              </button>
-              <button className="primary" disabled={busy || !size} onClick={saveCropped}>
-                保存裁剪并替换
-              </button>
-            </div>
-
-            {localMessage ? <div style={{ color: "var(--danger)", fontSize: 13 }}>{localMessage}</div> : null}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function FieldInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <div style={{ marginTop: 8 }}>
@@ -2416,9 +2487,24 @@ function RegenerationLogDrawer({
   logText: string;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="review-drawer-backdrop">
-      <aside className="review-drawer regeneration-log-drawer" role="dialog" aria-modal="true">
+    <div className="review-drawer-backdrop" onMouseDown={onClose}>
+      <aside
+        className="review-drawer regeneration-log-drawer"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="review-drawer-head">
           <div>
             <div className="section-title">{title}</div>
@@ -2523,9 +2609,24 @@ function RegenerationHistoryDrawer({
   onToggleLog,
   onClose,
 }: RegenerationHistoryDrawerProps) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="review-drawer-backdrop">
-      <aside className="review-drawer regeneration-history-drawer" role="dialog" aria-modal="true">
+    <div className="review-drawer-backdrop" onMouseDown={onClose}>
+      <aside
+        className="review-drawer regeneration-history-drawer"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="review-drawer-head">
           <div>
             <div className="section-title">重生成历史</div>

@@ -3246,6 +3246,16 @@ a.tab.active {
   box-shadow: var(--shadow-lg);
 }
 
+.cropper-frame {
+  min-height: 640px;
+}
+
+.crop-control-panel {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
 /* Responsive Media Queries */
 @media (max-width: 860px) {
   .header-container {

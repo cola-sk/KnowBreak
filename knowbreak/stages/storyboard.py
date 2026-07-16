@@ -46,7 +46,14 @@ def run(scripts_path: Path, cfg: Config, *, prompt: str | None = None) -> Storyb
                 topic_index=script.topic_index,
                 title=script.title,
                 shots=[
-                    StoryboardShot(index=i, **shot.model_dump())
+                    StoryboardShot(
+                        index=i,
+                        narration=shot.narration,
+                        visual=shot.visual,
+                        broll=shot.broll,
+                        subtitle=shot.subtitle if shot.subtitle.strip() else shot.narration,
+                        duration=shot.duration,
+                    )
                     for i, shot in enumerate(schema.shots)
                 ],
             )

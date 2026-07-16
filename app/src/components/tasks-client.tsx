@@ -561,9 +561,19 @@ function InlineReviewDrawer({
   state: ReviewDrawerState;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="review-drawer-backdrop">
-      <aside className="review-drawer" role="dialog" aria-modal="true">
+    <div className="review-drawer-backdrop" onMouseDown={onClose}>
+      <aside className="review-drawer" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
         <div className="review-drawer-head">
           <div>
             <div className="section-title">{stageLabel(state.stage)}</div>

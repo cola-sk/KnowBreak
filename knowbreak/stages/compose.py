@@ -37,6 +37,7 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
 
     images_map, cover_map = _load_images_map(pdir / "images.json", cfg.out_dir)
     script_titles = _load_script_title_map(pdir / "scripts.json")
+    subtitle_map = _load_storyboard_subtitle_map(pdir / "storyboards.json")
 
     videos = []
     for script in tts.scripts:
@@ -49,7 +50,12 @@ def run(tts_path: Path, cfg: Config, only_topic: int | None = None) -> dict:
         cover_img = cover_map.get(script.topic_index)
         display_title = script_titles.get(script.topic_index, script.title)
         images = _render_subtitle_images(
-            script_dir, display_title, script.lines, shot_imgs, cfg.profile.compose
+            script_dir,
+            display_title,
+            script.lines,
+            shot_imgs,
+            cfg.profile.compose,
+            subtitles=subtitle_map.get(script.topic_index),
         )
         durations = _line_durations(script_dir)
         intro_duration = cfg.intro.duration if cfg.intro.enabled else 0.0
@@ -112,6 +118,34 @@ def _load_script_title_map(path: Path) -> dict[int, str]:
     return result
 
 
+def _load_storyboard_subtitle_map(path: Path) -> dict[int, dict[int, str]]:
+    """Read per-shot display subtitles.
+
+    Empty strings are meaningful: they explicitly suppress on-screen subtitles.
+    If the storyboard file is missing, compose falls back to narration text.
+    """
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    result: dict[int, dict[int, str]] = {}
+    for board in data.get("storyboards", []):
+        topic_index = board.get("topic_index")
+        if not isinstance(topic_index, int):
+            continue
+        subtitles: dict[int, str] = {}
+        for idx, shot in enumerate(board.get("shots", [])):
+            shot_index = shot.get("index")
+            if not isinstance(shot_index, int):
+                shot_index = idx
+            subtitles[shot_index] = str(shot.get("subtitle") or "").strip()
+        result[topic_index] = subtitles
+    return result
+
+
 def _load_images_map(path: Path, out_dir: Path) -> tuple[dict[int, dict[int, str]], dict[int, str]]:
     """读 images.json，返回 shot 图和封面图。
 
@@ -140,6 +174,8 @@ def _render_subtitle_images(
     lines,
     shot_imgs: dict[int, str],
     style: ComposeProfile,
+    *,
+    subtitles: dict[int, str] | None = None,
 ) -> list[Path]:
     """每句生成一张 1080x1920 PNG：可选配图背景 + 顶部标题条 + 居中字幕 + 底部进度条。"""
     if DEFAULT_FONT_PATH is None:
@@ -160,23 +196,26 @@ def _render_subtitle_images(
         else:
             img = Image.new("RGB", (style.video_w, style.video_h), style.bg_color)
 
-        # 半透明遮罩层（顶部标题条 + 字幕区横带，跟随居中偏上的字幕位置）
+        subtitle_text = _subtitle_for_line(line, i, subtitles)
+
+        # 半透明遮罩层（顶部标题条 + 可选字幕区横带）
         overlay = Image.new("RGBA", (style.video_w, style.video_h), (0, 0, 0, 0))
         od = ImageDraw.Draw(overlay)
         od.rectangle(
             [0, 0, style.video_w, style.top_bar_height],
             fill=(0, 0, 0, style.top_bar_alpha),
         )
-        sub_center_y = int(style.video_h * style.subtitle_center_ratio)
-        od.rectangle(
-            [
-                0,
-                sub_center_y - style.subtitle_overlay_half_height,
-                style.video_w,
-                sub_center_y + style.subtitle_overlay_half_height,
-            ],
-            fill=(0, 0, 0, style.bottom_overlay_alpha),
-        )
+        if subtitle_text:
+            sub_center_y = int(style.video_h * style.subtitle_center_ratio)
+            od.rectangle(
+                [
+                    0,
+                    sub_center_y - style.subtitle_overlay_half_height,
+                    style.video_w,
+                    sub_center_y + style.subtitle_overlay_half_height,
+                ],
+                fill=(0, 0, 0, style.bottom_overlay_alpha),
+            )
         # 顶部渐变（让标题条边缘更柔和）
         gradient_end = style.top_bar_height + style.top_gradient_height
         for y in range(style.top_bar_height, gradient_end):
@@ -201,23 +240,24 @@ def _render_subtitle_images(
                 stroke_fill=style.stroke_color,
             )
 
-        # 字幕正文
-        max_line_width = style.video_w - 2 * style.text_side_margin
-        wrapped = _wrap_text(line.text, style.max_chars_per_line, font, max_line_width)
-        line_height = style.subtitle_font_size + 20
-        total_h = len(wrapped) * line_height
-        start_y = int(style.video_h * style.subtitle_center_ratio) - total_h // 2
-        center_x = int(style.video_w * style.subtitle_center_x_ratio)
-        for j, text_line in enumerate(wrapped):
-            lw = draw.textlength(text_line, font=font)
-            draw.text(
-                (center_x - lw / 2, start_y + j * line_height),
-                text_line,
-                font=font,
-                fill=style.text_color,
-                stroke_width=4,
-                stroke_fill=style.stroke_color,
-            )
+        # 字幕正文。字幕为空代表显式不显示字幕，不回退口播。
+        if subtitle_text:
+            max_line_width = style.video_w - 2 * style.text_side_margin
+            wrapped = _wrap_text(subtitle_text, style.max_chars_per_line, font, max_line_width)
+            line_height = style.subtitle_font_size + 20
+            total_h = len(wrapped) * line_height
+            start_y = int(style.video_h * style.subtitle_center_ratio) - total_h // 2
+            center_x = int(style.video_w * style.subtitle_center_x_ratio)
+            for j, text_line in enumerate(wrapped):
+                lw = draw.textlength(text_line, font=font)
+                draw.text(
+                    (center_x - lw / 2, start_y + j * line_height),
+                    text_line,
+                    font=font,
+                    fill=style.text_color,
+                    stroke_width=4,
+                    stroke_fill=style.stroke_color,
+                )
 
         # 进度条
         if style.progress_bar_enabled:
@@ -240,6 +280,12 @@ def _render_subtitle_images(
         img.save(out, "PNG")
         paths.append(out)
     return paths
+
+
+def _subtitle_for_line(line, index: int, subtitles: dict[int, str] | None) -> str:
+    if subtitles is None:
+        return str(getattr(line, "text", "") or "").strip()
+    return str(subtitles.get(index, "") or "").strip()
 
 
 def _render_intro_image(

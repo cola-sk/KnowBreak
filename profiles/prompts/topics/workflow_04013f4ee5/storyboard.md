@@ -31,7 +31,7 @@
 - 每个 visual 都要包含：时代氛围、地点、主体动作、镜头距离。
 - 优先使用这些镜头词：远景交代现场、中景看人物反应、近景看证据、特写看细节、俯拍看排列、逆光看气氛。
 - broll 要具体可搜索，例如“ancient Chinese court documents, Song dynasty yamen desk, wheat field crime scene reenactment, old sickle close up, forensic evidence illustration”。
-- subtitle 要短，像悬疑章节标题，不要把 narration 全塞进去。
+- 默认情况下 subtitle 必须与 narration 保持一致，不要留空；只有明确要做屏幕字幕差异化时，才把 subtitle 改成更短的悬疑章节标题。
 - subtitle 要帮助制造疑问，例如“伤口不对”“所有人都看错了”“宋慈只等太阳”“证据开始动了”，不要一开始就写“真相是血迹残留”。
 - 避免 generic science infographic、doctor laboratory、modern police、western medieval court、random microscope 这类出戏画面，除非真相揭底段确实需要极短的现代机制辅助。
 
@@ -43,5 +43,5 @@
 - narration
 - visual
 - broll
-- subtitle
+- subtitle（默认与 narration 相同）
 - duration

@@ -5,7 +5,7 @@ import pytest
 from knowbreak.config import ASRConfig, Config, IntroConfig, LLMConfig, TTSConfig
 from knowbreak.pipeline import _video_id_from_run_dir, artifact_path, resolve_project_run_dir, run_full
 from knowbreak.stages.review import _review_url
-from knowbreak.stages.compose import _load_images_map, _load_script_title_map
+from knowbreak.stages.compose import _load_images_map, _load_script_title_map, _load_storyboard_subtitle_map, _subtitle_for_line
 
 
 def _config(out_dir: Path) -> Config:
@@ -103,6 +103,32 @@ def test_compose_loads_latest_script_titles(tmp_path: Path) -> None:
     )
 
     assert _load_script_title_map(scripts_json) == {0: "新的封面标题"}
+
+
+def test_compose_uses_storyboard_subtitle_and_preserves_empty_subtitle(tmp_path: Path) -> None:
+    storyboards_json = tmp_path / "storyboards.json"
+    storyboards_json.write_text(
+        """{
+          "video_id": "video123",
+          "storyboards": [
+            {
+              "topic_index": 0,
+              "title": "测试",
+              "shots": [
+                {"index": 0, "subtitle": "短字幕"},
+                {"index": 1, "subtitle": ""}
+              ]
+            }
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    subtitles = _load_storyboard_subtitle_map(storyboards_json)
+
+    assert _subtitle_for_line(type("Line", (), {"text": "完整口播"})(), 0, subtitles[0]) == "短字幕"
+    assert _subtitle_for_line(type("Line", (), {"text": "有口播但不显示字幕"})(), 1, subtitles[0]) == ""
+    assert _subtitle_for_line(type("Line", (), {"text": "无 storyboards 时回退口播"})(), 0, None) == "无 storyboards 时回退口播"
 
 
 def test_video_id_from_run_dir_handles_legacy_and_versioned_dirs(tmp_path: Path) -> None:
