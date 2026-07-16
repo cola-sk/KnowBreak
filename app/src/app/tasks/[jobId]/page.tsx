@@ -4,14 +4,20 @@ import { TaskDetailClient } from "@/components/tasks-client";
 import { readJobDetail } from "@/lib/start-store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ jobId: string }>;
+  searchParams?: Promise<{ videoId?: string; version?: string }>;
 }
 
-export default async function TaskDetailPage({ params }: Props) {
+export default async function TaskDetailPage({ params, searchParams }: Props) {
   const { jobId } = await params;
-  const detail = await readJobDetail(jobId);
+  const query = await searchParams;
+  const detail = await readJobDetail(
+    jobId,
+    query?.videoId && query?.version ? { videoId: query.videoId, version: query.version } : undefined,
+  );
 
   if (!detail) {
     return (

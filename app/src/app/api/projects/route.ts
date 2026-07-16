@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { listProjectSummaries, resolveOutDir } from "@/lib/review-store";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const projects = await listProjectSummaries();

@@ -48,12 +48,28 @@ const PIPELINE_ARTIFACTS: Record<string, string> = {
   tts: "tts.json",
   compose: "compose.json",
 };
+const VERSION_MARKER_FILES = [
+  "workflow_plan.json",
+  "project_profile_overrides.json",
+  "project_runtime_overrides.json",
+];
 const VERSION_FLAGS_FILE = "_version_flags.json";
 const REGENERATION_JOB_FILE = "regenerate_job.json";
 const PROJECT_RUNTIME_OVERRIDES_FILE = "project_runtime_overrides.json";
 const REVIEW_STAGE_ORDER: ReviewStage[] = ["script_review", "storyboard_review", "image_review"];
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+
+interface ProjectJobSnapshot {
+  id?: string;
+  status?: string;
+  input?: string;
+  source?: string;
+  workflow?: string;
+  videoId?: string | null;
+  version?: string | null;
+  startedAt?: string;
+}
 
 function ensureSafeSegment(name: string, value: string): string {
   if (!SAFE_SEGMENT_RE.test(value)) {
@@ -1346,7 +1362,8 @@ async function listVersionSummaries(videoId: string, projectDir: string): Promis
   const rootDoneStages = Object.entries(PIPELINE_ARTIFACTS)
     .filter(([, fileName]) => existsSync(path.join(projectDir, fileName)))
     .map(([stage]) => stage);
-  if (rootDoneStages.length > 0) {
+  const rootHasRunMarker = VERSION_MARKER_FILES.some((fileName) => existsSync(path.join(projectDir, fileName)));
+  if (rootDoneStages.length > 0 || rootHasRunMarker) {
     versions.push(await buildVersionSummary(videoId, "legacy", projectDir));
   }
 
@@ -1359,7 +1376,8 @@ async function listVersionSummaries(videoId: string, projectDir: string): Promis
     const hasAnyArtifact = Object.values(PIPELINE_ARTIFACTS).some((name) =>
       existsSync(path.join(versionDir, name)),
     );
-    if (!hasAnyArtifact) {
+    const hasRunMarker = VERSION_MARKER_FILES.some((fileName) => existsSync(path.join(versionDir, fileName)));
+    if (!hasAnyArtifact && !hasRunMarker) {
       continue;
     }
     versions.push(await buildVersionSummary(videoId, child.name, versionDir));
@@ -1428,20 +1446,74 @@ async function latestVersionUpdatedAt(versionDir: string): Promise<string> {
   return new Date(latest || Date.now()).toISOString();
 }
 
+async function readProjectJobSnapshots(outDir: string): Promise<ProjectJobSnapshot[]> {
+  const dir = path.join(outDir, "_start_jobs");
+  let entries: Array<import("node:fs").Dirent> = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const jobs: ProjectJobSnapshot[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(await fs.readFile(path.join(dir, entry.name), "utf-8")) as ProjectJobSnapshot;
+      if (parsed.videoId && parsed.version && SAFE_SEGMENT_RE.test(parsed.videoId) && SAFE_SEGMENT_RE.test(parsed.version)) {
+        jobs.push(parsed);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return jobs;
+}
+
+function workflowStepsForJob(job: ProjectJobSnapshot, workflows: Awaited<ReturnType<typeof listWorkflows>>): string[] {
+  if (!job.workflow) {
+    return [];
+  }
+  const workflow = workflows.find((item) => item.path === job.workflow || item.id === job.workflow);
+  return workflow?.steps ?? [];
+}
+
+function versionSummaryFromJob(
+  job: ProjectJobSnapshot,
+  workflows: Awaited<ReturnType<typeof listWorkflows>>,
+): VersionSummary | null {
+  if (!job.videoId || !job.version || !SAFE_SEGMENT_RE.test(job.videoId) || !SAFE_SEGMENT_RE.test(job.version)) {
+    return null;
+  }
+  return {
+    version: job.version,
+    title: job.input || job.source || job.videoId,
+    doneStages: [],
+    workflowSteps: workflowStepsForJob(job, workflows),
+    review: {},
+    updatedAt: job.startedAt ?? new Date().toISOString(),
+    ignored: false,
+  };
+}
+
 export async function listProjectSummaries(): Promise<ProjectSummary[]> {
   const outDir = resolveOutDir();
   if (!existsSync(outDir)) {
     return [];
   }
   const projectJobTimes = await latestJobStartedAtByProject(outDir);
+  const projectJobs = await readProjectJobSnapshots(outDir);
+  const workflows = projectJobs.length > 0 ? await listWorkflows() : [];
 
   const entries = await fs.readdir(outDir, { withFileTypes: true });
   const projectDirs = entries.filter((entry) => entry.isDirectory());
 
-  const projects: ProjectSummary[] = [];
+  const projectsById = new Map<string, ProjectSummary>();
   for (const dirent of projectDirs) {
     const videoId = dirent.name;
-    if (!SAFE_SEGMENT_RE.test(videoId)) {
+    if (videoId === "_start_jobs" || !SAFE_SEGMENT_RE.test(videoId)) {
       continue;
     }
     const projectDir = path.join(outDir, videoId);
@@ -1449,8 +1521,31 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
     if (versions.length === 0) {
       continue;
     }
-    projects.push({ videoId, title: versions[0]?.title ?? videoId, versions });
+    projectsById.set(videoId, { videoId, title: versions[0]?.title ?? videoId, versions });
   }
+
+  for (const job of projectJobs) {
+    const summary = versionSummaryFromJob(job, workflows);
+    if (!summary || !job.videoId) {
+      continue;
+    }
+    const existing = projectsById.get(job.videoId);
+    if (existing) {
+      if (!existing.versions.some((version) => version.version === summary.version)) {
+        existing.versions.push(summary);
+        existing.versions.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      }
+      existing.title = existing.versions[0]?.title ?? existing.title;
+      continue;
+    }
+    projectsById.set(job.videoId, {
+      videoId: job.videoId,
+      title: summary.title || job.videoId,
+      versions: [summary],
+    });
+  }
+
+  const projects = Array.from(projectsById.values());
 
   projects.sort((a, b) => {
     const aJobTime = projectJobTimes.get(a.videoId) ?? 0;

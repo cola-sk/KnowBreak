@@ -2366,7 +2366,7 @@ function RegenerationProgressCard({ job, detail, showLog, onShowLog, onCloseLog,
       ) : null}
       {job.error ? <div style={{ color: "var(--danger)" }}>{job.error}</div> : null}
       <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <Link href={`/tasks/${job.id}`} className="secondary compact-btn">
+        <Link href={`/tasks/${job.id}?videoId=${encodeURIComponent(videoId)}&version=${encodeURIComponent(version)}`} className="secondary compact-btn">
           任务详情
         </Link>
         <button type="button" className="secondary compact-btn" onClick={onShowLog}>
@@ -2487,6 +2487,7 @@ function RegenerationHistoryList({ jobs, currentJobId, videoId, version }: Regen
         <RegenerationHistoryDrawer
           jobs={jobs}
           currentJobId={currentJobId}
+          videoId={videoId}
           version={version}
           openId={openId}
           logCache={logCache}
@@ -2502,6 +2503,7 @@ function RegenerationHistoryList({ jobs, currentJobId, videoId, version }: Regen
 interface RegenerationHistoryDrawerProps {
   jobs: RegenerationJob[];
   currentJobId: string | undefined;
+  videoId: string;
   version: string;
   openId: string | null;
   logCache: Record<string, RegenerationJobDetail>;
@@ -2513,6 +2515,7 @@ interface RegenerationHistoryDrawerProps {
 function RegenerationHistoryDrawer({
   jobs,
   currentJobId,
+  videoId,
   version,
   openId,
   logCache,
@@ -2549,7 +2552,7 @@ function RegenerationHistoryDrawer({
                     <span style={{ color: "var(--muted)" }}>耗时: {formatElapsed(job.startedAt, job.finishedAt)}</span>
                   </div>
                   <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                    <Link href={`/tasks/${job.id}`} className="secondary compact-btn">
+                    <Link href={`/tasks/${job.id}?videoId=${encodeURIComponent(videoId)}&version=${encodeURIComponent(version)}`} className="secondary compact-btn">
                       任务详情
                     </Link>
                     <button type="button" className="secondary compact-btn" onClick={() => onToggleLog(job.id)}>

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <!-- Main background gradient: coral → deep rose -->
+    <linearGradient id="bgGrad" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#f07078" />
+      <stop offset="100%" stop-color="#b52d35" />
+    </linearGradient>
+    <!-- Shine highlight on top-left -->
+    <radialGradient id="shineGrad" cx="30%" cy="25%" r="55%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.22)" />
+      <stop offset="100%" stop-color="rgba(255,255,255,0)" />
+    </radialGradient>
+    <!-- Subtle shadow for depth -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(150,30,30,0.4)" />
+    </filter>
+  </defs>
+
+  <!-- Rounded hexagon background (clip via path for rounded corners) -->
+  <!-- Using a path with rounded hex approximation -->
+  <path d="
+    M32,5
+    L52.5,16.5
+    Q55,18 55,21
+    L55,43
+    Q55,46 52.5,47.5
+    L32,59
+    L11.5,47.5
+    Q9,46 9,43
+    L9,21
+    Q9,18 11.5,16.5
+    Z
+  " fill="url(#bgGrad)" filter="url(#shadow)" />
+
+  <!-- Shine overlay -->
+  <path d="
+    M32,5
+    L52.5,16.5
+    Q55,18 55,21
+    L55,43
+    Q55,46 52.5,47.5
+    L32,59
+    L11.5,47.5
+    Q9,46 9,43
+    L9,21
+    Q9,18 11.5,16.5
+    Z
+  " fill="url(#shineGrad)" />
+
+  <!-- Letter K — clean, geometric, semi-rounded -->
+  <!-- Vertical bar -->
+  <rect x="19" y="18" width="6" height="28" rx="3" fill="white" />
+
+  <!-- Upper arm of K -->
+  <path d="M25,32 L39,18 L45.5,18 L31,33.5 Z" fill="white" />
+
+  <!-- Lower arm of K -->
+  <path d="M25,32 L45.5,46 L39,46 L31,32.5 Z" fill="white" />
+
+  <!-- "Break point" accent: three small dots suggesting fracture/insight -->
+  <circle cx="43" cy="19.5" r="2.8" fill="white" opacity="0.95" />
+  <circle cx="47" cy="25" r="1.8" fill="white" opacity="0.6" />
+  <circle cx="46" cy="31" r="1.2" fill="white" opacity="0.35" />
+</svg>

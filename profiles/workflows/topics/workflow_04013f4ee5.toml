@@ -13,13 +13,13 @@ steps = [
 ]
 
 [capabilities.topic_seed]
-prompt = "prompts/topics/洗冤录系列/topic_seed.md"
+prompt = "prompts/topics/workflow_04013f4ee5/topic_seed.md"
 params = { target_duration = "150" }
 inputs = []
 outputs = ["topics.json"]
 
 [capabilities.script]
-prompt = "prompts/topics/洗冤录系列/script.md"
+prompt = "prompts/topics/workflow_04013f4ee5/script.md"
 inputs = ["topics.json"]
 outputs = ["scripts.json"]
 
@@ -28,7 +28,7 @@ inputs = ["scripts.json"]
 outputs = ["reviews/script_review.json"]
 
 [capabilities.storyboard]
-prompt = "prompts/topics/洗冤录系列/storyboard.md"
+prompt = "prompts/topics/workflow_04013f4ee5/storyboard.md"
 inputs = ["scripts.json"]
 outputs = ["storyboards.json"]
 
@@ -37,7 +37,7 @@ inputs = ["storyboards.json"]
 outputs = ["reviews/storyboard_review.json"]
 
 [capabilities.images]
-prompt = "prompts/topics/洗冤录系列/images.md"
+prompt = "prompts/topics/workflow_04013f4ee5/images.md"
 inputs = ["storyboards.json"]
 outputs = ["images.json", "images/"]
 

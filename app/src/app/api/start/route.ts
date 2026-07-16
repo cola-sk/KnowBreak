@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { createWriteStream, existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 
 import { buildRuntimeEnv } from "@/lib/runtime-env";
-import { listWorkflows, resolveProjectRoot } from "@/lib/review-store";
+import { listWorkflows, resolveOutDir, resolveProjectRoot } from "@/lib/review-store";
 import { runtimeOverridesToEnv, type ProjectRuntimeOverrides } from "@/lib/tts-settings";
 import {
   type StartJob,
@@ -19,9 +19,11 @@ import {
 } from "@/lib/start-store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 const URL_RE = /^(https?:\/\/|youtu\.be\/|youtube\.com)/i;
+const SOURCE_KEY_RE = /(\/[a-zA-Z0-9_-]{6,})/;
 
 interface StartRequest {
   input?: string;
@@ -51,6 +53,45 @@ function resolveSource(input: string): { source: string; kind: "url" | "topic" }
     return { source: trimmed, kind: "url" };
   }
   return { source: `manual:${trimmed}`, kind: "topic" };
+}
+
+function videoIdFromSource(source: string): string {
+  const key = SOURCE_KEY_RE.exec(source)?.[1] ?? source;
+  return createHash("sha256").update(key).digest("hex").slice(0, 10);
+}
+
+async function nextVersion(videoId: string): Promise<string> {
+  const base = path.join(resolveOutDir(), videoId);
+  let max = 0;
+  let entries: Array<import("node:fs").Dirent> = [];
+  try {
+    entries = await fs.readdir(base, { withFileTypes: true });
+  } catch {
+    return "v001";
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const match = /^v(\d{3,})$/.exec(entry.name);
+    if (match) {
+      max = Math.max(max, Number.parseInt(match[1], 10));
+    }
+  }
+  let candidate = max + 1;
+  while (existsSync(path.join(base, `v${String(candidate).padStart(3, "0")}`))) {
+    candidate += 1;
+  }
+  return `v${String(candidate).padStart(3, "0")}`;
+}
+
+async function inferInitialRunIds(source: string, kind: "url" | "topic"): Promise<{ videoId: string; version: string }> {
+  const resolvedSource = kind === "topic" && source.startsWith("manual:") ? source.slice("manual:".length) : source;
+  const videoId = videoIdFromSource(resolvedSource);
+  return {
+    videoId,
+    version: await nextVersion(videoId),
+  };
 }
 
 async function validateWorkflowInputMode(workflowName: string, inputKind: "url" | "topic"): Promise<void> {
@@ -89,6 +130,7 @@ export async function POST(request: Request) {
 
     const logPath = jobLogPath(jobId);
     await fs.mkdir(path.dirname(logPath), { recursive: true });
+    const initialRunIds = await inferInitialRunIds(source, kind);
 
     const initial: StartJob = {
       id: jobId,
@@ -97,8 +139,8 @@ export async function POST(request: Request) {
       input: body.input ?? "",
       source,
       workflow,
-      videoId: null,
-      version: null,
+      videoId: initialRunIds.videoId,
+      version: initialRunIds.version,
       command,
       logPath: relativeJobLogPath(jobId),
       startedAt: new Date().toISOString(),
@@ -143,8 +185,8 @@ export async function POST(request: Request) {
         ...current,
         ...patch,
         status: preserveCanceled ? "canceled" : patch.status ?? current.status,
-        videoId: current.videoId ?? parsed.videoId ?? null,
-        version: current.version ?? parsed.version ?? null,
+        videoId: parsed.videoId ?? current.videoId ?? null,
+        version: parsed.version ?? current.version ?? null,
         error: preserveCanceled ? current.error : patch.error,
         finishedAt: new Date().toISOString(),
       };

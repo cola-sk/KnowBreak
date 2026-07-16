@@ -2195,7 +2195,7 @@ a.tab.active {
 }
 
 .task-detail-fields {
-  grid-template-columns: minmax(260px, 1.8fr) repeat(4, minmax(150px, 1fr));
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--panel-border);
@@ -2212,16 +2212,16 @@ a.tab.active {
 }
 
 .task-field:first-child,
-.task-field:nth-child(5) {
+.task-field:nth-child(4) {
   border-left: 0;
 }
 
-.task-field:nth-child(n + 5) {
+.task-field:nth-child(n + 4) {
   border-top: 1px solid var(--panel-border);
 }
 
 .task-field-wide {
-  grid-column: span 2;
+  grid-column: auto;
 }
 
 .task-field-label {

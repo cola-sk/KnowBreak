@@ -2,7 +2,14 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { getVersionDir, listWorkflows, resolveOutDir } from "@/lib/review-store";
+import {
+  getVersionDir,
+  listWorkflows,
+  parseRegenerationStage,
+  readRegenerationJobForId,
+  readRegenerationJobLogForId,
+  resolveOutDir,
+} from "@/lib/review-store";
 import type { RegenerationJob } from "@/lib/types";
 
 export interface StartJob {
@@ -41,6 +48,11 @@ export interface StartJobDetail {
   currentStage: string | null;
   logText: string;
   logUpdatedAt: string | null;
+}
+
+export interface JobProjectContext {
+  videoId: string;
+  version: string;
 }
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
@@ -133,10 +145,10 @@ export async function listStartJobs(): Promise<StartJob[]> {
   return jobs.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
 }
 
-export async function readJobDetail(jobId: string): Promise<StartJobDetail | null> {
+export async function readJobDetail(jobId: string, context?: JobProjectContext): Promise<StartJobDetail | null> {
   const job = await readJobMeta(jobId);
   if (!job) {
-    return null;
+    return context ? readProjectJobDetail(jobId, context) : null;
   }
   const { text, updatedAt } = await readJobLogForMeta(job);
   const normalizedJob = await normalizeJob(job, text, updatedAt);
@@ -145,6 +157,26 @@ export async function readJobDetail(jobId: string): Promise<StartJobDetail | nul
   return {
     job: normalizedJob,
     stages,
+    currentStage,
+    logText: text,
+    logUpdatedAt: updatedAt,
+  };
+}
+
+async function readProjectJobDetail(jobId: string, context: JobProjectContext): Promise<StartJobDetail | null> {
+  if (!SAFE_SEGMENT_RE.test(context.videoId) || !SAFE_SEGMENT_RE.test(context.version)) {
+    return null;
+  }
+  const job = await readRegenerationJobForId(context.videoId, context.version, jobId);
+  if (!job) {
+    return null;
+  }
+  const { text, updatedAt } = await readRegenerationJobLogForId(context.videoId, context.version, jobId);
+  const currentStage = parseRegenerationStage(text);
+  const startJob = startJobFromRegenerationJob(context.videoId, context.version, job);
+  return {
+    job: startJob,
+    stages: await buildStageProgress(startJob, currentStage),
     currentStage,
     logText: text,
     logUpdatedAt: updatedAt,
@@ -317,12 +349,17 @@ async function readLegacyRegenerationTaskFromFile(filePath: string): Promise<Sta
   const segments = rel.split(path.sep);
   const videoId = segments[0] ?? null;
   const version = segments.length >= 4 ? segments[1] : "legacy";
+  return startJobFromRegenerationJob(videoId, version, job);
+}
+
+function startJobFromRegenerationJob(videoId: string | null, version: string, job: RegenerationJob): StartJob {
   const target = job.targetVersion ?? version;
+  const requested = job.requestedFromVersion ?? version;
   return {
     id: job.id,
     taskType: "regenerate",
-    status: job.status,
-    input: `重新生成 ${videoId ?? "-"} / ${job.requestedFromVersion ?? version}${target && target !== (job.requestedFromVersion ?? version) ? ` -> ${target}` : ""}`,
+    status: job.status as StartJob["status"],
+    input: `重新生成 ${videoId ?? "-"} / ${requested}${target && target !== requested ? ` -> ${target}` : ""}`,
     source: job.source,
     workflow: job.workflow,
     videoId,
