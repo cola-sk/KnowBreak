@@ -310,9 +310,16 @@ export async function getReviewStatuses(
 
 export async function getStageData(videoId: string, version: string, stage: ArtifactStage): Promise<{ artifact: unknown; review: ReviewFile }> {
   const artifactFilePath = artifactPath(videoId, version, stage);
-  const artifact = await readJsonFile<unknown>(artifactFilePath);
+  let artifact = await readJsonFile<unknown>(artifactFilePath);
   if (artifact === null) {
     throw new Error(`Artifact not found: ${artifactFilePath}`);
+  }
+  if (stage === "images") {
+    const normalized = normalizeImagesArtifactPaths(videoId, version, artifact);
+    if (JSON.stringify(normalized) !== JSON.stringify(artifact)) {
+      artifact = normalized;
+      await writeJsonFile(artifactFilePath, artifact);
+    }
   }
   const review = await ensureReviewFile(videoId, version, stage, artifact);
   return { artifact, review };
@@ -430,7 +437,16 @@ export interface StartPresetData {
 }
 
 async function readArtifact(videoId: string, version: string, stage: ArtifactStage): Promise<unknown | null> {
-  return readJsonFile<unknown>(artifactPath(videoId, version, stage));
+  const artifactFilePath = artifactPath(videoId, version, stage);
+  const artifact = await readJsonFile<unknown>(artifactFilePath);
+  if (stage !== "images" || artifact === null) {
+    return artifact;
+  }
+  const normalized = normalizeImagesArtifactPaths(videoId, version, artifact);
+  if (JSON.stringify(normalized) !== JSON.stringify(artifact)) {
+    await writeJsonFile(artifactFilePath, normalized);
+  }
+  return normalized;
 }
 
 function stageLabel(stage: string): string {
@@ -865,11 +881,17 @@ export async function updateStageData(
   const artifactFilePath = artifactPath(videoId, version, stage);
 
   if (artifact !== undefined) {
+    if (stage === "images") {
+      artifact = normalizeImagesArtifactPaths(videoId, version, artifact);
+    }
     await writeJsonFile(artifactFilePath, artifact);
   } else {
     artifact = await readJsonFile<unknown>(artifactFilePath);
     if (artifact === null) {
       throw new Error(`Artifact not found: ${artifactFilePath}`);
+    }
+    if (stage === "images") {
+      artifact = normalizeImagesArtifactPaths(videoId, version, artifact);
     }
   }
 
@@ -1226,6 +1248,59 @@ function createPendingImageEntry(
   };
 }
 
+function normalizeImagesArtifactPaths(videoId: string, version: string, artifact: unknown): unknown {
+  if (!Array.isArray(artifact)) {
+    return artifact;
+  }
+
+  return artifact.map((topic) => {
+    if (!topic || typeof topic !== "object") {
+      return topic;
+    }
+    const typedTopic = topic as {
+      topic_index?: number;
+      cover?: MutableImageEntry;
+      shots?: Array<{ shot_index?: number } & MutableImageEntry>;
+    };
+    if (typeof typedTopic.topic_index !== "number") {
+      return topic;
+    }
+
+    const normalizedTopic = { ...typedTopic };
+    if (normalizedTopic.cover && typeof normalizedTopic.cover === "object") {
+      normalizedTopic.cover = {
+        ...normalizedTopic.cover,
+        image_path: imageEntryPath(videoId, version, typedTopic.topic_index, {
+          topicIndex: typedTopic.topic_index,
+          isCover: true,
+        }),
+      };
+    }
+
+    if (Array.isArray(typedTopic.shots)) {
+      const byShotIndex = new Map<number, { shot_index?: number } & MutableImageEntry>();
+      for (const shot of typedTopic.shots) {
+        if (typeof shot?.shot_index !== "number") {
+          continue;
+        }
+        byShotIndex.set(shot.shot_index, {
+          ...shot,
+          image_path: imageEntryPath(videoId, version, typedTopic.topic_index, {
+            topicIndex: typedTopic.topic_index,
+            shotIndex: shot.shot_index,
+            isCover: false,
+          }),
+        });
+      }
+      normalizedTopic.shots = Array.from(byShotIndex.values()).sort(
+        (left, right) => (left.shot_index ?? 0) - (right.shot_index ?? 0),
+      );
+    }
+
+    return normalizedTopic;
+  });
+}
+
 function locateImageEntry(artifact: unknown, itemId: string, options?: LocateImageEntryOptions): MutableImageEntry {
   if (!Array.isArray(artifact)) {
     throw new Error("images artifact is not an array");
@@ -1295,8 +1370,10 @@ export async function replaceImageForReviewItem(
   imageData: Uint8Array,
 ): Promise<{ artifact: unknown; review: ReviewFile; imagePath: string }> {
   const { artifact, review } = await getStageData(videoId, version, "images");
+  const parsed = parseImageItemId(itemId);
   const entry = locateImageEntry(artifact, itemId, { videoId, version, createIfMissing: true });
-  const relativeImagePath = entry.image_path;
+  const relativeImagePath = imageEntryPath(videoId, version, parsed.topicIndex, parsed);
+  entry.image_path = relativeImagePath;
   if (!relativeImagePath) {
     throw new Error(`Image path missing for ${itemId}`);
   }
@@ -1364,8 +1441,10 @@ export async function replaceImageWithGeneratedImageForReviewItem(
   metadata: GeneratedImageMetadata,
 ): Promise<{ artifact: unknown; review: ReviewFile; imagePath: string }> {
   const { artifact, review } = await getStageData(videoId, version, "images");
+  const parsed = parseImageItemId(itemId);
   const entry = locateImageEntry(artifact, itemId, { videoId, version, createIfMissing: true });
-  const relativeImagePath = entry.image_path;
+  const relativeImagePath = imageEntryPath(videoId, version, parsed.topicIndex, parsed);
+  entry.image_path = relativeImagePath;
   if (!relativeImagePath) {
     throw new Error(`Image path missing for ${itemId}`);
   }

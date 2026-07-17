@@ -191,7 +191,12 @@ def _run_capability(
     elif step == "assets":
         assets.run(pdir / "storyboards.json", cfg)
     elif step == "images":
-        images.run(pdir / "storyboards.json", cfg, prompt=resolved_prompt)
+        images.run(
+            pdir / "storyboards.json",
+            cfg,
+            prompt=resolved_prompt,
+            skip_text_only_cards=_bool_param(cap.params.get("skip_text_only_cards")),
+        )
     elif step == "image_review":
         review.run(pdir, "image_review", out_dir=cfg.out_dir)
     elif step == "tts":
@@ -211,6 +216,12 @@ def _video_id_from_run_dir(pdir: Path, out_dir: Path) -> str:
         if pdir.parent == out_dir:
             return pdir.name
     return pdir.parent.name
+
+
+def _bool_param(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def resolve_project_run_dir(

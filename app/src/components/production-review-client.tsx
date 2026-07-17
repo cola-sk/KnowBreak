@@ -325,7 +325,6 @@ function normalizeShotImagesForRows(
   return Array.from({ length: rowCount }, (_, rowIndex) => {
     const shot = board?.shots[rowIndex] ?? null;
     const source = findRowImage(topic, shot, rowIndex)
-      ?? topic.shots[rowIndex]
       ?? createPendingShotImage(videoId, version, topic.topic_index, rowIndex);
     return {
       ...source,
@@ -352,7 +351,14 @@ function normalizeArtifactsForTimeline(
     nextArtifacts.storyboard = {
       ...artifacts.storyboard,
       storyboards: artifacts.storyboard.storyboards.map((board) => {
-        const normalized = { ...board, shots: reindexStoryboardShots(board.shots) };
+        const script = artifacts.script?.scripts.find((item) => item.topic_index === board.topic_index);
+        const normalized = {
+          ...board,
+          shots: reindexStoryboardShots(board.shots).map((shot, index) => ({
+            ...shot,
+            duration: script?.lines[index]?.estimated_seconds ?? shot.duration,
+          })),
+        };
         boardByTopic.set(board.topic_index, board);
         return normalized;
       }),
@@ -728,6 +734,51 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
 
   const recalcScriptDuration = (lines: ScriptLine[]): number =>
     Number(lines.reduce((acc, line) => acc + (Number(line.estimated_seconds) || 0), 0).toFixed(1));
+
+  const updateRecordDuration = (recordIndex: number, value: string) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    markDirty("script", "storyboard");
+    setData((prev) => {
+      const nextArtifacts = { ...prev.artifacts };
+
+      if (prev.artifacts.script) {
+        nextArtifacts.script = {
+          ...prev.artifacts.script,
+          scripts: prev.artifacts.script.scripts.map((script) => {
+            if (script.topic_index !== topicIndex) {
+              return script;
+            }
+            const nextLines = script.lines.map((line, idx) =>
+              idx === recordIndex ? { ...line, estimated_seconds: parsed } : line,
+            );
+            return { ...script, lines: nextLines, total_duration: recalcScriptDuration(nextLines) };
+          }),
+        };
+      }
+
+      if (prev.artifacts.storyboard) {
+        nextArtifacts.storyboard = {
+          ...prev.artifacts.storyboard,
+          storyboards: prev.artifacts.storyboard.storyboards.map((board) => {
+            if (board.topic_index !== topicIndex) {
+              return board;
+            }
+            return {
+              ...board,
+              shots: board.shots.map((shot, idx) =>
+                idx === recordIndex ? { ...shot, duration: parsed } : shot,
+              ),
+            };
+          }),
+        };
+      }
+
+      return { ...prev, artifacts: nextArtifacts };
+    });
+  };
 
   const updateScriptLine = (lineIndex: number, key: keyof ScriptLine, value: string) => {
     markDirty("script");
@@ -1645,6 +1696,7 @@ export function ProductionReviewClient({ initial, profileBase, globalOverrides, 
           onScriptTitleChange={updateScriptTitle}
           onScriptCoverNarrationChange={updateScriptCoverNarration}
           onShotChange={updateShot}
+          onRecordDurationChange={updateRecordDuration}
           onRecordAdd={addReviewRecord}
           onRecordDelete={deleteReviewRecord}
           onImageChange={updateImage}
@@ -1718,6 +1770,7 @@ function GroupedTopicEditor({
   onScriptTitleChange,
   onScriptCoverNarrationChange,
   onShotChange,
+  onRecordDurationChange,
   onRecordAdd,
   onRecordDelete,
   onImageChange,
@@ -1737,6 +1790,7 @@ function GroupedTopicEditor({
   onScriptTitleChange: (value: string) => void;
   onScriptCoverNarrationChange: (value: string) => void;
   onShotChange: (shotIndex: number, key: keyof Shot, value: string) => void;
+  onRecordDurationChange: (recordIndex: number, value: string) => void;
   onRecordAdd: (afterIndex: number | null) => void;
   onRecordDelete: (recordIndex: number) => void;
   onImageChange: (kind: "cover" | "shot", shotIndex: number | undefined, key: keyof ImageEntry, value: string) => void;
@@ -1849,14 +1903,14 @@ function GroupedTopicEditor({
                 </div>
               </div>
               <div className="row" style={{ alignItems: "flex-end", gap: 8 }}>
-                {shot ? (
-                  <div style={{ width: 128 }}>
-                    <label style={{ fontSize: 12, color: "var(--muted)" }}>duration</label>
+                {line || shot ? (
+                  <div style={{ width: 180 }}>
+                    <label style={{ fontSize: 12, color: "var(--muted)" }}>时长（秒）</label>
                     <input
                       type="number"
                       step="0.1"
-                      value={shot.duration}
-                      onChange={(event) => onShotChange(idx, "duration", event.target.value)}
+                      value={line?.estimated_seconds ?? shot?.duration ?? 0}
+                      onChange={(event) => onRecordDurationChange(idx, event.target.value)}
                     />
                   </div>
                 ) : null}
@@ -1922,13 +1976,11 @@ function GroupedTopicEditor({
               <div className="shot-fields">
                 <div className="field-group">
                   <div className="field-group-title">口播文案</div>
+                  <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                    有口播时，最终视频时长以 TTS 实际音频时长为准；口播为空时，按上方时长生成静音停留。
+                  </div>
                   {line ? (
                     <>
-                      <FieldInput
-                        label="estimated_seconds"
-                        value={String(line.estimated_seconds)}
-                        onChange={(value) => onScriptChange(idx, "estimated_seconds", value)}
-                      />
                       <FieldTextarea
                         label="text"
                         value={line.text}

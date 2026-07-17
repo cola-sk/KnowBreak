@@ -309,7 +309,7 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
                     <th style={{ textAlign: "left" }}>画面</th>
                     <th style={{ textAlign: "left" }}>B-roll</th>
                     <th style={{ textAlign: "left" }}>字幕</th>
-                    <th style={{ textAlign: "left" }}>时长</th>
+                    <th style={{ textAlign: "left" }}>参考时长</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -361,6 +361,9 @@ export function StoryboardReviewClient({ videoId, version, initial, readOnly = f
                         />
                       </td>
                       <td style={{ padding: "8px 6px", width: 110 }}>
+                        <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4, marginBottom: 4 }}>
+                          最终有口播以 TTS 为准
+                        </div>
                         <input
                           type="number"
                           step="0.1"

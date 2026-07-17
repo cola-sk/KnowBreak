@@ -1,4 +1,4 @@
-id = "洗冤录系列"
+id = "洗冤集录系列"
 description = "主题 workflow：洗冤集录系列通用模版。输入任一明确的宋慈法医案例主题，生成悬疑口播、古法检验与现代科学解密的短视频。"
 
 steps = [
@@ -38,6 +38,7 @@ outputs = ["reviews/storyboard_review.json"]
 
 [capabilities.images]
 prompt = "prompts/topics/workflow_04013f4ee5/images.md"
+params = { skip_text_only_cards = "true" }
 inputs = ["storyboards.json"]
 outputs = ["images.json", "images/"]
 

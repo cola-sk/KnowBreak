@@ -58,3 +58,55 @@ def test_storyboard_defaults_empty_subtitle_to_narration(tmp_path: Path, monkeyp
     shot = result.storyboards[0].shots[0]
     assert shot.narration == "这是一句口播。"
     assert shot.subtitle == "这是一句口播。"
+
+
+def test_storyboard_forces_subtitle_to_narration_when_narration_exists(tmp_path: Path, monkeypatch) -> None:
+    scripts_path = tmp_path / "scripts.json"
+    scripts_path.write_text(
+        """{
+          "video_id": "video123",
+          "scripts": [
+            {
+              "topic_index": 0,
+              "title": "测试",
+              "lines": [
+                {"text": "这是一句完整口播。", "estimated_seconds": 3},
+                {"text": "", "estimated_seconds": 5}
+              ],
+              "total_duration": 8
+            }
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    class FakeLLM:
+        def __init__(self, _cfg):
+            pass
+
+        def chat_json(self, _system_prompt, _user_prompt, schema, **_kwargs):
+            return schema(
+                shots=[
+                    {
+                        "narration": "这是一句完整口播。",
+                        "visual": "测试画面",
+                        "broll": "test b-roll",
+                        "subtitle": "精简字幕",
+                        "duration": 3,
+                    },
+                    {
+                        "narration": "",
+                        "visual": "",
+                        "broll": "",
+                        "subtitle": "无口播说明卡",
+                        "duration": 5,
+                    },
+                ]
+            )
+
+    monkeypatch.setattr(storyboard, "LLM", FakeLLM)
+
+    result = storyboard.run(scripts_path, _config(tmp_path / "out"), prompt="test")
+
+    assert result.storyboards[0].shots[0].subtitle == "这是一句完整口播。"
+    assert result.storyboards[0].shots[1].subtitle == "无口播说明卡"

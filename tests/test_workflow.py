@@ -48,6 +48,7 @@ def test_typhoon_tape_myth_workflow_has_review_gates() -> None:
     ]
     assert workflow.capabilities["script_review"].inputs == ["scripts.json"]
     assert workflow.capabilities["storyboard_review"].inputs == ["storyboards.json"]
+    assert workflow.capabilities["images"].params == {"skip_text_only_cards": "true"}
 
 
 def test_all_workflow_prompt_paths_exist() -> None:

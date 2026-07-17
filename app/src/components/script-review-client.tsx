@@ -334,7 +334,7 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
                       onChange={(event) => updateLine(sIdx, lIdx, "text", event.target.value)}
                     />
                     <div>
-                      <label style={{ fontSize: 12, color: "var(--muted)" }}>estimated_seconds</label>
+                      <label style={{ fontSize: 12, color: "var(--muted)" }}>时长（秒）</label>
                       <input
                         type="number"
                         step="0.1"
@@ -344,6 +344,9 @@ export function ScriptReviewClient({ videoId, version, initial, readOnly = false
                           updateLine(sIdx, lIdx, "estimated_seconds", event.target.value)
                         }
                       />
+                      <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4, marginTop: 4 }}>
+                        有口播时以 TTS 实际时长为准；空口播按此生成静音。
+                      </div>
                     </div>
                   </div>
                 </div>

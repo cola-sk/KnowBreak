@@ -51,6 +51,106 @@ def test_images_without_provider_keys_writes_empty_manifest(tmp_path: Path) -> N
     assert (pdir / "images.json").exists()
 
 
+def test_images_skips_text_only_card_shot_only_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    pdir = out_dir / "video123"
+    pdir.mkdir(parents=True)
+    storyboards_path = pdir / "storyboards.json"
+    storyboards_path.write_text(
+        Storyboards(
+            video_id="video123",
+            storyboards=[
+                Storyboard(
+                    topic_index=0,
+                    title="洗冤集录测试",
+                    shots=[
+                        StoryboardShot(
+                            index=0,
+                            narration="",
+                            visual="",
+                            broll="",
+                            subtitle="《洗冤集录》说明文字",
+                            duration=12.0,
+                        ),
+                        StoryboardShot(
+                            index=1,
+                            narration="《洗冤集录》系列：测试案。",
+                            visual="宋代案卷摆在桌上，近景",
+                            broll="song dynasty forensic documents",
+                            subtitle="《洗冤集录》系列：测试案。",
+                            duration=3.0,
+                        ),
+                    ],
+                )
+            ],
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    cfg = Config(
+        llm=LLMConfig(base_url="http://example.invalid/v1", api_key="test", model="test"),
+        asr=ASRConfig(provider="openai", model="test"),
+        tts=TTSConfig(),
+        intro=IntroConfig(),
+        out_dir=out_dir,
+        project_root=tmp_path,
+        image_providers=("pollinations",),
+    )
+
+    class FakeLLM:
+        def __init__(self, _cfg):
+            pass
+
+        def chat_json(self, _system_prompt, _user_prompt, schema, **_kwargs):
+            return schema(
+                cover_keywords=["song dynasty forensic"],
+                cover_generation_prompt="cover prompt",
+                shots=[
+                    {"index": 0, "keywords": ["ancient book"], "generation_prompt": "should be skipped"},
+                    {"index": 1, "keywords": ["song dynasty archive"], "generation_prompt": "story shot"},
+                ],
+            )
+
+    calls: list[Path] = []
+
+    def fake_fetch_cover_image(*_args, **_kwargs):
+        return None
+
+    def fake_fetch_with_fallbacks(_cfg, _providers, _queries, out_path, _used_source_urls, *, gen_prompt=None):
+        calls.append(out_path)
+        out_path.write_bytes(b"fake-jpeg")
+        return {
+            "provider": "pollinations",
+            "mode": "generate",
+            "query": "song dynasty archive",
+            "prompt": gen_prompt or "",
+        }
+
+    monkeypatch.setattr(images, "LLM", FakeLLM)
+    monkeypatch.setattr(images, "_fetch_cover_image", fake_fetch_cover_image)
+    monkeypatch.setattr(images, "_fetch_with_fallbacks", fake_fetch_with_fallbacks)
+
+    result = images.run(storyboards_path, cfg, prompt="test")
+
+    assert calls == [
+        pdir / "images" / "0" / "shot_000.jpg",
+        pdir / "images" / "0" / "shot_001.jpg",
+    ]
+    assert [shot["shot_index"] for shot in result[0]["shots"]] == [0, 1]
+
+    calls.clear()
+    result = images.run(storyboards_path, cfg, prompt="test", skip_text_only_cards=True)
+
+    assert calls == [pdir / "images" / "0" / "shot_001.jpg"]
+    assert len(result[0]["shots"]) == 1
+    shot_image = result[0]["shots"][0]
+    assert shot_image["shot_index"] == 1
+    assert shot_image["image_path"] == "video123/images/0/shot_001.jpg"
+    assert shot_image["provider"] == "pollinations"
+    assert shot_image["query"] == "song dynasty archive"
+    assert "Core scene: story shot" in shot_image["prompt"]
+    assert "Storyboard visual: 宋代案卷摆在桌上，近景" in shot_image["prompt"]
+
+
 def test_pollinations_provider_is_active_without_key(tmp_path: Path) -> None:
     cfg = Config(
         llm=LLMConfig(base_url="http://example.invalid/v1", api_key="test", model="test"),

@@ -28,6 +28,14 @@ class _StoryboardSchema(BaseModel):
     shots: list[_ShotItem]
 
 
+def _subtitle_for_generated_shot(shot: _ShotItem) -> str:
+    narration = shot.narration.strip()
+    if narration:
+        return shot.narration
+    # 允许特定 workflow 生成“无口播、有字幕”的说明卡。
+    return shot.subtitle
+
+
 def run(scripts_path: Path, cfg: Config, *, prompt: str | None = None) -> Storyboards:
     scripts: Scripts = Scripts.model_validate_json(scripts_path.read_text(encoding="utf-8"))
     system_prompt = prompt or cfg.profile.require_prompt("storyboard_system")
@@ -51,7 +59,7 @@ def run(scripts_path: Path, cfg: Config, *, prompt: str | None = None) -> Storyb
                         narration=shot.narration,
                         visual=shot.visual,
                         broll=shot.broll,
-                        subtitle=shot.subtitle if shot.subtitle.strip() else shot.narration,
+                        subtitle=_subtitle_for_generated_shot(shot),
                         duration=shot.duration,
                     )
                     for i, shot in enumerate(schema.shots)

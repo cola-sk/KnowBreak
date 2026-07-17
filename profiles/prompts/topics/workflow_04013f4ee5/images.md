@@ -16,6 +16,7 @@
 
 ## 关键词规则（`keywords` / `cover_keywords`）
 
+- 如果某个 shot 是《洗冤集录》静默说明卡：`narration`、`visual`、`broll` 都为空，但 `subtitle` 是长段介绍文字，则该 shot 不需要背景图。对这个 shot 输出 `keywords: []`、`generation_prompt: ""`，不要根据 subtitle 生成古籍、案卷或书页背景。
 - 必须是英文、可检索、可视化名词短语。
 - 每个 shot 只给 2-3 个关键词，避免抽象词和完整句子。
 - 优先包含“场景 + 证据物 + 人物动作”中的至少两项。

@@ -54,6 +54,7 @@ def run(
     cover_only: bool = False,
     *,
     prompt: str | None = None,
+    skip_text_only_cards: bool = False,
 ) -> list[dict]:
     boards: Storyboards = Storyboards.model_validate_json(
         storyboards_path.read_text(encoding="utf-8")
@@ -80,12 +81,24 @@ def run(
         topic_dir.mkdir(exist_ok=True)
 
         used_source_urls: set[str] = set()
-        cover = _fetch_cover_image(cfg, providers, board, cover_keywords, cover_gen_prompt, topic_dir, used_source_urls)
+        cover = _fetch_cover_image(
+            cfg,
+            providers,
+            board,
+            cover_keywords,
+            cover_gen_prompt,
+            topic_dir,
+            used_source_urls,
+            skip_text_only_cards=skip_text_only_cards,
+        )
         shot_images: list[dict] = []
         if cover_only:
             shot_images = existing_map.get(board.topic_index, {}).get("shots", [])
         else:
             for shot in board.shots:
+                if skip_text_only_cards and _is_text_only_card(shot):
+                    print(f"  - topic {board.topic_index} shot {shot.index}: text-only card, skip image")
+                    continue
                 kws = kw_map.get(shot.index, [])
                 query = " ".join(kws[:2]) if kws else shot.broll[:60]
                 img_path = topic_dir / f"shot_{shot.index:03d}.jpg"
@@ -199,13 +212,21 @@ def _fetch_cover_image(
     cover_gen_prompt: str,
     topic_dir: Path,
     used_source_urls: set[str],
+    *,
+    skip_text_only_cards: bool = False,
 ) -> dict | None:
     query = " ".join(cover_keywords[:3]) if cover_keywords else board.title
-    first_broll = board.shots[0].broll if board.shots else ""
+    reference_shot = next(
+        (shot for shot in board.shots if not (skip_text_only_cards and _is_text_only_card(shot))),
+        None,
+    )
+    if reference_shot is None and board.shots:
+        reference_shot = board.shots[0]
+    first_broll = reference_shot.broll if reference_shot else ""
     cover_path = topic_dir / "cover.jpg"
     prompt_to_use = _build_cover_generated_prompt(
         board.title,
-        board.shots[0] if board.shots else None,
+        reference_shot,
         query,
         core_prompt=cover_gen_prompt,
     )
@@ -225,6 +246,15 @@ def _fetch_cover_image(
         }
     print(f"  ✗ topic {board.topic_index} cover: {query} (no result)")
     return None
+
+
+def _is_text_only_card(shot) -> bool:
+    """A deliberate card with subtitles only; compose should use a plain background."""
+    narration = str(getattr(shot, "narration", "") or "").strip()
+    visual = str(getattr(shot, "visual", "") or "").strip()
+    broll = str(getattr(shot, "broll", "") or "").strip()
+    subtitle = str(getattr(shot, "subtitle", "") or "").strip()
+    return not narration and not visual and not broll and bool(subtitle)
 
 
 def _cover_provider_order(providers: list[str]) -> list[str]:

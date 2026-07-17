@@ -197,6 +197,13 @@ def _render_subtitle_images(
             img = Image.new("RGB", (style.video_w, style.video_h), style.bg_color)
 
         subtitle_text = _subtitle_for_line(line, i, subtitles)
+        max_line_width = style.video_w - 2 * style.text_side_margin
+        wrapped_subtitle: list[str] = []
+        subtitle_line_height = style.subtitle_font_size + 20
+        subtitle_total_h = 0
+        if subtitle_text:
+            wrapped_subtitle = _wrap_text(subtitle_text, style.max_chars_per_line, font, max_line_width)
+            subtitle_total_h = len(wrapped_subtitle) * subtitle_line_height
 
         # 半透明遮罩层（顶部标题条 + 可选字幕区横带）
         overlay = Image.new("RGBA", (style.video_w, style.video_h), (0, 0, 0, 0))
@@ -206,14 +213,9 @@ def _render_subtitle_images(
             fill=(0, 0, 0, style.top_bar_alpha),
         )
         if subtitle_text:
-            sub_center_y = int(style.video_h * style.subtitle_center_ratio)
+            overlay_top, overlay_bottom = _subtitle_overlay_bounds(style, subtitle_total_h)
             od.rectangle(
-                [
-                    0,
-                    sub_center_y - style.subtitle_overlay_half_height,
-                    style.video_w,
-                    sub_center_y + style.subtitle_overlay_half_height,
-                ],
+                [0, overlay_top, style.video_w, overlay_bottom],
                 fill=(0, 0, 0, style.bottom_overlay_alpha),
             )
         # 顶部渐变（让标题条边缘更柔和）
@@ -242,16 +244,12 @@ def _render_subtitle_images(
 
         # 字幕正文。字幕为空代表显式不显示字幕，不回退口播。
         if subtitle_text:
-            max_line_width = style.video_w - 2 * style.text_side_margin
-            wrapped = _wrap_text(subtitle_text, style.max_chars_per_line, font, max_line_width)
-            line_height = style.subtitle_font_size + 20
-            total_h = len(wrapped) * line_height
-            start_y = int(style.video_h * style.subtitle_center_ratio) - total_h // 2
+            start_y = int(style.video_h * style.subtitle_center_ratio) - subtitle_total_h // 2
             center_x = int(style.video_w * style.subtitle_center_x_ratio)
-            for j, text_line in enumerate(wrapped):
+            for j, text_line in enumerate(wrapped_subtitle):
                 lw = draw.textlength(text_line, font=font)
                 draw.text(
-                    (center_x - lw / 2, start_y + j * line_height),
+                    (center_x - lw / 2, start_y + j * subtitle_line_height),
                     text_line,
                     font=font,
                     fill=style.text_color,
@@ -286,6 +284,14 @@ def _subtitle_for_line(line, index: int, subtitles: dict[int, str] | None) -> st
     if subtitles is None:
         return str(getattr(line, "text", "") or "").strip()
     return str(subtitles.get(index, "") or "").strip()
+
+
+def _subtitle_overlay_bounds(style: ComposeProfile, text_height: int) -> tuple[int, int]:
+    center_y = int(style.video_h * style.subtitle_center_ratio)
+    min_half_height = style.subtitle_overlay_half_height
+    dynamic_half_height = text_height // 2 + max(32, style.subtitle_font_size // 2)
+    half_height = max(min_half_height, dynamic_half_height)
+    return max(0, center_y - half_height), min(style.video_h, center_y + half_height)
 
 
 def _render_intro_image(

@@ -5,7 +5,14 @@ import pytest
 from knowbreak.config import ASRConfig, Config, IntroConfig, LLMConfig, TTSConfig
 from knowbreak.pipeline import _video_id_from_run_dir, artifact_path, resolve_project_run_dir, run_full
 from knowbreak.stages.review import _review_url
-from knowbreak.stages.compose import _load_images_map, _load_script_title_map, _load_storyboard_subtitle_map, _subtitle_for_line
+from knowbreak.stages.compose import (
+    _load_images_map,
+    _load_script_title_map,
+    _load_storyboard_subtitle_map,
+    _subtitle_for_line,
+    _subtitle_overlay_bounds,
+)
+from knowbreak.style_profile import ComposeProfile
 
 
 def _config(out_dir: Path) -> Config:
@@ -129,6 +136,21 @@ def test_compose_uses_storyboard_subtitle_and_preserves_empty_subtitle(tmp_path:
     assert _subtitle_for_line(type("Line", (), {"text": "完整口播"})(), 0, subtitles[0]) == "短字幕"
     assert _subtitle_for_line(type("Line", (), {"text": "有口播但不显示字幕"})(), 1, subtitles[0]) == ""
     assert _subtitle_for_line(type("Line", (), {"text": "无 storyboards 时回退口播"})(), 0, None) == "无 storyboards 时回退口播"
+
+
+def test_subtitle_overlay_expands_for_long_text() -> None:
+    style = ComposeProfile(
+        video_h=1920,
+        subtitle_center_ratio=0.45,
+        subtitle_overlay_half_height=120,
+        subtitle_font_size=62,
+    )
+
+    short_top, short_bottom = _subtitle_overlay_bounds(style, text_height=80)
+    long_top, long_bottom = _subtitle_overlay_bounds(style, text_height=900)
+
+    assert short_bottom - short_top == 240
+    assert long_bottom - long_top > short_bottom - short_top
 
 
 def test_video_id_from_run_dir_handles_legacy_and_versioned_dirs(tmp_path: Path) -> None:
