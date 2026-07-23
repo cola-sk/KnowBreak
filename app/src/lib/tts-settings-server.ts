@@ -108,6 +108,16 @@ export async function readImageRuntimeBaseDefaults(): Promise<ImageRuntimeDefaul
       "KB_HUGGINGFACE_IMAGE_BASE_URL",
       "https://router.huggingface.co/hf-inference/models",
     ),
+    volcengineModel: envValue(
+      env,
+      "KB_VOLCENGINE_IMAGE_MODEL",
+      "doubao-seedream-4-0-250828",
+    ),
+    volcengineBaseUrl: envValue(
+      env,
+      "KB_VOLCENGINE_IMAGE_BASE_URL",
+      "https://ark.cn-beijing.volces.com/api/v3",
+    ),
   };
 }
 

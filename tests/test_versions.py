@@ -96,6 +96,30 @@ def test_compose_loads_versioned_image_paths(tmp_path: Path) -> None:
     assert shots[0][0] == str(out_dir / "video123" / "v001" / "images" / "0" / "shot_000.jpg")
 
 
+def test_compose_ignores_pending_image_entries(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    pdir = out_dir / "video123" / "v001"
+    pdir.mkdir(parents=True)
+    images_json = pdir / "images.json"
+    images_json.write_text(
+        """[
+          {
+            "topic_index": 0,
+            "shots": [
+              {"shot_index": 0, "provider": "pending", "image_path": "video123/v001/images/0/shot_000.jpg"},
+              {"shot_index": 1, "provider": "manual_upload", "image_path": "video123/v001/images/0/shot_001.jpg"}
+            ]
+          }
+        ]""",
+        encoding="utf-8",
+    )
+
+    shots, _covers = _load_images_map(images_json, out_dir)
+
+    assert 0 not in shots[0]
+    assert shots[0][1] == str(out_dir / "video123" / "v001" / "images" / "0" / "shot_001.jpg")
+
+
 def test_compose_loads_latest_script_titles(tmp_path: Path) -> None:
     scripts_json = tmp_path / "scripts.json"
     scripts_json.write_text(

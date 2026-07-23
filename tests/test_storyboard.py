@@ -110,3 +110,74 @@ def test_storyboard_forces_subtitle_to_narration_when_narration_exists(tmp_path:
 
     assert result.storyboards[0].shots[0].subtitle == "这是一句完整口播。"
     assert result.storyboards[0].shots[1].subtitle == "无口播说明卡"
+
+
+def test_storyboard_skips_extra_generated_title_card_and_aligns_by_script_line(tmp_path: Path, monkeypatch) -> None:
+    scripts_path = tmp_path / "scripts.json"
+    scripts_path.write_text(
+        """{
+          "video_id": "video123",
+          "scripts": [
+            {
+              "topic_index": 0,
+              "title": "测试",
+              "lines": [
+                {"text": "", "estimated_seconds": 12},
+                {"text": "第一句口播。", "estimated_seconds": 3},
+                {"text": "第二句口播。", "estimated_seconds": 4}
+              ],
+              "total_duration": 19
+            }
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    class FakeLLM:
+        def __init__(self, _cfg):
+            pass
+
+        def chat_json(self, _system_prompt, _user_prompt, schema, **_kwargs):
+            return schema(
+                shots=[
+                    {
+                        "narration": "",
+                        "visual": "",
+                        "broll": "",
+                        "subtitle": "静默说明卡",
+                        "duration": 12,
+                    },
+                    {
+                        "narration": "",
+                        "visual": "LLM 多生成的片头画面",
+                        "broll": "extra title card",
+                        "subtitle": "",
+                        "duration": 3,
+                    },
+                    {
+                        "narration": "第一句口播。",
+                        "visual": "第一句画面",
+                        "broll": "first visual",
+                        "subtitle": "短字幕一",
+                        "duration": 3,
+                    },
+                    {
+                        "narration": "第二句口播。",
+                        "visual": "第二句画面",
+                        "broll": "second visual",
+                        "subtitle": "短字幕二",
+                        "duration": 4,
+                    },
+                ]
+            )
+
+    monkeypatch.setattr(storyboard, "LLM", FakeLLM)
+
+    result = storyboard.run(scripts_path, _config(tmp_path / "out"), prompt="test")
+    shots = result.storyboards[0].shots
+
+    assert [shot.index for shot in shots] == [0, 1, 2]
+    assert [shot.narration for shot in shots] == ["", "第一句口播。", "第二句口播。"]
+    assert [shot.visual for shot in shots] == ["", "第一句画面", "第二句画面"]
+    assert [shot.subtitle for shot in shots] == ["静默说明卡", "第一句口播。", "第二句口播。"]
+    assert [shot.duration for shot in shots] == [12, 3, 4]

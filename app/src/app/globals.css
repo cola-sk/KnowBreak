@@ -3153,6 +3153,21 @@ a.tab.active {
   border-top: 1px solid var(--panel-border);
 }
 
+.image-generate-error {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .shot-preview,
 .shot-empty-preview {
   width: 100%;

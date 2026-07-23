@@ -33,6 +33,36 @@ function cleanPrompt(prompt: string): string {
   return value;
 }
 
+async function providerRequestError(response: Response, providerLabel: string): Promise<Error> {
+  const raw = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 500);
+  let detail = raw;
+  if (raw) {
+    try {
+      const payload = JSON.parse(raw) as {
+        error?: string | { code?: string; message?: string };
+        errors?: Array<{ code?: string; message?: string }>;
+        message?: string;
+      };
+      const firstError = payload.errors?.[0];
+      if (typeof payload.error === "string") {
+        detail = payload.error;
+      } else if (payload.error?.message) {
+        detail = payload.error.code
+          ? `${payload.error.code}: ${payload.error.message}`
+          : payload.error.message;
+      } else if (firstError?.message) {
+        detail = firstError.code ? `${firstError.code}: ${firstError.message}` : firstError.message;
+      } else if (payload.message) {
+        detail = payload.message;
+      }
+    } catch {
+      // Keep the response excerpt when the provider did not return JSON.
+    }
+  }
+  const status = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+  return new Error(`${providerLabel} 请求失败（${status}）${detail ? `：${detail}` : ""}`);
+}
+
 export async function generateTextToImage(request: TextToImageRequest): Promise<TextToImageResult> {
   const provider = request.provider?.trim() || "pollinations";
   if (provider === "pollinations") {
@@ -43,6 +73,9 @@ export async function generateTextToImage(request: TextToImageRequest): Promise<
   }
   if (provider === "huggingface") {
     return generateHuggingFaceImage(request);
+  }
+  if (provider === "volcengine") {
+    return generateVolcengineImage(request);
   }
   throw new Error(`Unsupported text-to-image provider: ${provider}`);
 }
@@ -74,7 +107,7 @@ async function generatePollinationsImage(request: TextToImageRequest): Promise<T
     { headers },
   );
   if (!response.ok) {
-    throw new Error(`Pollinations generation failed: ${response.status}`);
+    throw await providerRequestError(response, "Pollinations");
   }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.startsWith("image/")) {
@@ -123,7 +156,7 @@ async function generateCloudflareWorkersImage(request: TextToImageRequest): Prom
     },
   );
   if (!response.ok) {
-    throw new Error(`Cloudflare Workers AI generation failed: ${response.status}`);
+    throw await providerRequestError(response, "Cloudflare Workers AI");
   }
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -205,16 +238,7 @@ async function generateHuggingFaceImage(request: TextToImageRequest): Promise<Te
     }),
   });
   if (!response.ok) {
-    let errMsg = `Hugging Face image generation failed: ${response.status}`;
-    try {
-      const payload = await response.json();
-      if (payload && typeof payload.error === "string") {
-        errMsg = `Hugging Face error (${response.status}): ${payload.error}`;
-      }
-    } catch {
-      // ignore
-    }
-    throw new Error(errMsg);
+    throw await providerRequestError(response, "Hugging Face");
   }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.startsWith("image/")) {
@@ -235,6 +259,100 @@ async function generateHuggingFaceImage(request: TextToImageRequest): Promise<Te
       source_url: "",
       creator: "ai_generated",
       license: "model_terms",
+    },
+  };
+}
+
+async function generateVolcengineImage(request: TextToImageRequest): Promise<TextToImageResult> {
+  const prompt = cleanPrompt(request.prompt);
+  const width = request.width ?? 1080;
+  const height = request.height ?? 1920;
+  const apiKey = process.env.KB_VOLCENGINE_IMAGE_API_KEY
+    || process.env.KB_VOLC_IMAGE_API_KEY
+    || process.env.ARK_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "Volcengine image generation requires KB_VOLCENGINE_IMAGE_API_KEY, KB_VOLC_IMAGE_API_KEY, or ARK_API_KEY",
+    );
+  }
+
+  const resolvedModel = request.model?.trim()
+    || process.env.KB_VOLCENGINE_IMAGE_MODEL
+    || "doubao-seedream-4-0-250828";
+  const resolvedSize = process.env.KB_VOLCENGINE_IMAGE_SIZE?.trim() || "2K";
+  const baseUrl = (process.env.KB_VOLCENGINE_IMAGE_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3")
+    .replace(/\/$/, "");
+  const endpoint = baseUrl.endsWith("/images/generations")
+    ? baseUrl
+    : `${baseUrl}/images/generations`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: resolvedModel,
+      prompt,
+      sequential_image_generation: "disabled",
+      response_format: "url",
+      size: resolvedSize,
+      stream: false,
+      watermark: false,
+    }),
+  });
+  if (!response.ok) {
+    throw await providerRequestError(response, "火山引擎方舟");
+  }
+
+  const payload = (await response.json()) as {
+    data?: Array<{ url?: string; b64_json?: string }>;
+  };
+  const item = payload.data?.[0];
+  if (!item) {
+    throw new Error("Volcengine returned JSON without data[0]");
+  }
+
+  let bytes: Uint8Array;
+  let contentType: string;
+  if (item.url) {
+    const imageResponse = await fetch(item.url);
+    if (!imageResponse.ok) {
+      throw new Error(`Volcengine image download failed: ${imageResponse.status}`);
+    }
+    bytes = new Uint8Array(await imageResponse.arrayBuffer());
+    contentType = imageResponse.headers.get("content-type") ?? "";
+  } else if (item.b64_json) {
+    bytes = new Uint8Array(Buffer.from(item.b64_json, "base64"));
+    contentType = "image/png";
+  } else {
+    throw new Error("Volcengine returned data[0] without url or b64_json");
+  }
+
+  const looksLikeImage = contentType.startsWith("image/")
+    || (bytes[0] === 0xff && bytes[1] === 0xd8)
+    || (bytes[0] === 0x89 && bytes[1] === 0x50)
+    || (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46);
+  if (!looksLikeImage) {
+    throw new Error(`Volcengine returned non-image content: ${contentType || "unknown"}`);
+  }
+  if (!contentType.startsWith("image/")) {
+    contentType = bytes[0] === 0xff ? "image/jpeg" : bytes[0] === 0x52 ? "image/webp" : "image/png";
+  }
+
+  return {
+    bytes,
+    contentType,
+    metadata: {
+      provider: "volcengine",
+      mode: "generate",
+      prompt,
+      model: resolvedModel,
+      width,
+      height,
+      source_url: "",
+      creator: "ai_generated",
+      license: "provider_terms",
     },
   };
 }

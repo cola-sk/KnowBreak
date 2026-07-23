@@ -1,5 +1,5 @@
 export type TtsProvider = "volcengine" | "edge" | "openai" | "minimax";
-export type ImageProvider = "pexels" | "pixabay" | "pollinations" | "cloudflare_workers" | "huggingface";
+export type ImageProvider = "pexels" | "pixabay" | "pollinations" | "cloudflare_workers" | "huggingface" | "volcengine";
 
 export interface TtsRuntimeOverrides {
   provider?: string;
@@ -35,6 +35,10 @@ export interface ImageRuntimeOverrides {
   huggingface_model?: string;
   huggingfaceBaseUrl?: string;
   huggingface_base_url?: string;
+  volcengineModel?: string;
+  volcengine_model?: string;
+  volcengineBaseUrl?: string;
+  volcengine_base_url?: string;
 }
 
 export interface ImageRuntimeDefaults {
@@ -43,6 +47,8 @@ export interface ImageRuntimeDefaults {
   cloudflareModel: string;
   huggingfaceModel: string;
   huggingfaceBaseUrl: string;
+  volcengineModel: string;
+  volcengineBaseUrl: string;
 }
 
 export interface TtsHistoryItem extends TtsRuntimeDefaults {
@@ -69,6 +75,7 @@ export const IMAGE_PROVIDER_OPTIONS: Array<{ value: ImageProvider; label: string
   { value: "pollinations", label: "Pollinations 生成", kind: "generate" },
   { value: "cloudflare_workers", label: "Cloudflare Workers AI", kind: "generate" },
   { value: "huggingface", label: "Hugging Face", kind: "generate" },
+  { value: "volcengine", label: "火山引擎方舟", kind: "generate" },
 ];
 
 export const FALLBACK_IMAGE_RUNTIME_DEFAULTS: ImageRuntimeDefaults = {
@@ -77,6 +84,8 @@ export const FALLBACK_IMAGE_RUNTIME_DEFAULTS: ImageRuntimeDefaults = {
   cloudflareModel: "@cf/black-forest-labs/flux-1-schnell",
   huggingfaceModel: "black-forest-labs/FLUX.1-schnell",
   huggingfaceBaseUrl: "https://router.huggingface.co/hf-inference/models",
+  volcengineModel: "doubao-seedream-4-0-250828",
+  volcengineBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
 };
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<TtsProvider, string> = {
@@ -116,6 +125,9 @@ export function normalizeImageProvider(value: string | undefined): ImageProvider
   }
   if (normalized === "hf") {
     return "huggingface";
+  }
+  if (["volc", "volcano", "volc_engine", "ark", "doubao"].includes(normalized)) {
+    return "volcengine";
   }
   return IMAGE_PROVIDER_OPTIONS.some((item) => item.value === normalized)
     ? normalized as ImageProvider
@@ -197,6 +209,16 @@ export function effectiveImageSettings(
       || image?.huggingface_base_url
       || defaults.huggingfaceBaseUrl
       || FALLBACK_IMAGE_RUNTIME_DEFAULTS.huggingfaceBaseUrl,
+    volcengineModel:
+      image?.volcengineModel
+      || image?.volcengine_model
+      || defaults.volcengineModel
+      || FALLBACK_IMAGE_RUNTIME_DEFAULTS.volcengineModel,
+    volcengineBaseUrl:
+      image?.volcengineBaseUrl
+      || image?.volcengine_base_url
+      || defaults.volcengineBaseUrl
+      || FALLBACK_IMAGE_RUNTIME_DEFAULTS.volcengineBaseUrl,
   };
 }
 
@@ -220,6 +242,8 @@ export function countRuntimeOverrideLeaves(value: ProjectRuntimeOverrides | unde
       "cloudflareModel",
       "huggingfaceModel",
       "huggingfaceBaseUrl",
+      "volcengineModel",
+      "volcengineBaseUrl",
     ].filter((key) => {
       const item = value.image?.[key as keyof ImageRuntimeOverrides];
       return typeof item === "string" && item.trim();
@@ -247,6 +271,8 @@ export function compactRuntimeOverrides(value: ProjectRuntimeOverrides): Project
       cloudflareModel: effective.cloudflareModel,
       huggingfaceModel: effective.huggingfaceModel,
       huggingfaceBaseUrl: effective.huggingfaceBaseUrl,
+      volcengineModel: effective.volcengineModel,
+      volcengineBaseUrl: effective.volcengineBaseUrl,
     };
   }
   return next;
@@ -287,6 +313,8 @@ export function runtimeOverridesToEnv(value: ProjectRuntimeOverrides | undefined
     env.KB_CLOUDFLARE_IMAGE_MODEL = effective.cloudflareModel;
     env.KB_HUGGINGFACE_IMAGE_MODEL = effective.huggingfaceModel;
     env.KB_HUGGINGFACE_IMAGE_BASE_URL = effective.huggingfaceBaseUrl;
+    env.KB_VOLCENGINE_IMAGE_MODEL = effective.volcengineModel;
+    env.KB_VOLCENGINE_IMAGE_BASE_URL = effective.volcengineBaseUrl;
   }
 
   return env;

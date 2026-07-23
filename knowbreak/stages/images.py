@@ -22,7 +22,7 @@ from ..models import Storyboards
 PEXELS_SEARCH = "https://api.pexels.com/v1/search"
 PIXABAY_SEARCH = "https://pixabay.com/api/"
 MIN_DIM = 1080  # 至少 1080px 宽
-GENERATED_IMAGE_PROVIDERS = {"pollinations", "cloudflare_workers", "huggingface"}
+GENERATED_IMAGE_PROVIDERS = {"pollinations", "cloudflare_workers", "huggingface", "volcengine"}
 
 CONTEXT_SOURCE_LABELS = {
     "title": "Topic title",
@@ -179,6 +179,11 @@ def _active_providers(cfg: Config) -> list[str]:
                 providers.append(provider)
             else:
                 print("  - 跳过 Hugging Face：未配置 KB_HUGGINGFACE_API_TOKEN 或 HF_TOKEN")
+        elif provider == "volcengine":
+            if cfg.volcengine_image_api_key:
+                providers.append(provider)
+            else:
+                print("  - 跳过火山引擎生图：未配置 KB_VOLCENGINE_IMAGE_API_KEY 或 ARK_API_KEY")
         else:
             print(f"  - 跳过未知图片 provider：{provider}")
     if not providers:
@@ -458,6 +463,8 @@ def _cache_key_material(cfg: Config, provider: str, prompt_or_query: str) -> str
         model = cfg.cloudflare_image_model
     elif provider == "huggingface":
         model = cfg.huggingface_image_model
+    elif provider == "volcengine":
+        model = f"{cfg.volcengine_image_model}:{cfg.volcengine_image_size}"
     else:
         model = ""
     return f"{provider}:{model}:{prompt_or_query}"

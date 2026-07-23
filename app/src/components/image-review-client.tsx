@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ImageCropDialog, type CropEditorState } from "@/components/image-crop-dialog";
+import { readApiJson } from "@/lib/api-response";
 import { readImageFileFromClipboard } from "@/lib/clipboard-image";
 import { buildContextualImagePrompt } from "@/lib/image-generation-prompt";
 import {
@@ -105,6 +106,7 @@ interface GenerateEditorState {
   promptSource: PromptSource;
   sources: PromptSources;
   useContextPrompt: boolean;
+  error?: string;
   previewImageBase64?: string;
   previewContentType?: string;
   previewMetadata?: GeneratedImageMetadata;
@@ -143,6 +145,7 @@ const IMAGE_PROVIDER_OPTIONS = [
   { value: "pollinations", label: "Pollinations", defaultModel: "" },
   { value: "cloudflare_workers", label: "Cloudflare Workers AI", defaultModel: "@cf/black-forest-labs/flux-1-schnell" },
   { value: "huggingface", label: "Hugging Face", defaultModel: "black-forest-labs/FLUX.1-schnell" },
+  { value: "volcengine", label: "火山引擎方舟", defaultModel: "doubao-seedream-4-0-250828" },
 ];
 
 function defaultModelForProvider(provider: string): string {
@@ -163,7 +166,30 @@ function imageModelForProvider(provider: string, settings: ImageRuntimeDefaults)
   if (provider === "huggingface") {
     return settings.huggingfaceModel;
   }
+  if (provider === "volcengine") {
+    return settings.volcengineModel;
+  }
   return defaultModelForProvider(provider);
+}
+
+function storedImageModel(provider: string, fallback: string): string {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  const legacyModel = window.localStorage.getItem("kb_last_image_provider") === provider
+    ? window.localStorage.getItem("kb_last_image_model")
+    : null;
+  return window.localStorage.getItem(`kb_last_image_model:${provider}`)
+    ?? legacyModel
+    ?? fallback;
+}
+
+function rememberImageModel(provider: string, model: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(`kb_last_image_model:${provider}`, model);
+  window.localStorage.setItem("kb_last_image_model", model);
 }
 
 function statusClass(status: string): string {
@@ -255,9 +281,8 @@ export function ImageReviewClient({
               : "fallback";
     const initialPrompt = sources[defaultSource] || "";
     const savedProvider = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_provider") : null;
-    const savedModel = typeof window !== "undefined" ? window.localStorage.getItem("kb_last_image_model") : null;
     const provider = savedProvider || defaultGenerationProvider(imageDefaults.providers);
-    const model = savedModel !== null ? savedModel : imageModelForProvider(provider, imageDefaults);
+    const model = storedImageModel(provider, imageModelForProvider(provider, imageDefaults));
 
     setGenerateEditor({
       itemId,
@@ -467,7 +492,7 @@ export function ImageReviewClient({
     }
     const rawPrompt = generateEditor.prompt.trim();
     if (!rawPrompt) {
-      setMessage("请输入生图提示词。");
+      setGenerateEditor((prev) => prev ? { ...prev, error: "请输入生图提示词。" } : prev);
       return;
     }
     const prompt = generateEditor.useContextPrompt
@@ -482,6 +507,7 @@ export function ImageReviewClient({
     setSaving(true);
     setGeneratingItemId(generateEditor.itemId);
     setMessage("");
+    setGenerateEditor((prev) => prev ? { ...prev, error: undefined } : prev);
 
     try {
       const response = await fetch(`/api/projects/${videoId}/${version}/images/generate`, {
@@ -494,7 +520,7 @@ export function ImageReviewClient({
           prompt,
         }),
       });
-      const payload = (await response.json()) as
+      const payload = await readApiJson<
         | {
             preview?: {
               imageBase64: string;
@@ -502,7 +528,8 @@ export function ImageReviewClient({
               metadata: GeneratedImageMetadata;
             };
           }
-        | { error: string };
+        | { error: string }
+      >(response);
 
       if (!response.ok || !("preview" in payload) || !payload.preview) {
         throw new Error("error" in payload ? payload.error : "生成失败");
@@ -510,6 +537,7 @@ export function ImageReviewClient({
       setGenerateEditor((prev) => prev
         ? {
             ...prev,
+            error: undefined,
             previewImageBase64: payload.preview!.imageBase64,
             previewContentType: payload.preview!.contentType,
             previewMetadata: payload.preview!.metadata,
@@ -517,7 +545,9 @@ export function ImageReviewClient({
         : prev);
       setMessage("AI 图片已生成预览，确认后点击插入替换。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "生成失败");
+      const errorMessage = error instanceof Error ? error.message : "生成失败";
+      setGenerateEditor((prev) => prev ? { ...prev, error: errorMessage } : prev);
+      setMessage(errorMessage);
     } finally {
       setSaving(false);
       setGeneratingItemId(null);
@@ -533,6 +563,7 @@ export function ImageReviewClient({
     setSaving(true);
     setGeneratingItemId(generateEditor.itemId);
     setMessage("");
+    setGenerateEditor((prev) => prev ? { ...prev, error: undefined } : prev);
 
     try {
       const response = await fetch(`/api/projects/${videoId}/${version}/images/generate`, {
@@ -545,9 +576,10 @@ export function ImageReviewClient({
           metadata: generateEditor.previewMetadata,
         }),
       });
-      const payload = (await response.json()) as
+      const payload = await readApiJson<
         | (ImageReviewPayload & { imagePath: string })
-        | { error: string };
+        | { error: string }
+      >(response);
 
       if (!response.ok) {
         throw new Error("error" in payload ? payload.error : "插入失败");
@@ -561,7 +593,9 @@ export function ImageReviewClient({
       setGenerateEditor(null);
       setMessage(`AI 图片已插入并替换本地文件：${successPayload.imagePath}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "插入失败");
+      const errorMessage = error instanceof Error ? error.message : "插入失败";
+      setGenerateEditor((prev) => prev ? { ...prev, error: errorMessage } : prev);
+      setMessage(errorMessage);
     } finally {
       setSaving(false);
       setGeneratingItemId(null);
@@ -930,11 +964,11 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
                   disabled={busy}
                   onChange={(event) => {
                     const provider = event.target.value;
-                    const model = imageModelForProvider(provider, imageDefaults);
+                    const model = storedImageModel(provider, imageModelForProvider(provider, imageDefaults));
                     if (typeof window !== "undefined") {
                       window.localStorage.setItem("kb_last_image_provider", provider);
-                      window.localStorage.setItem("kb_last_image_model", model);
                     }
+                    rememberImageModel(provider, model);
                     onChange({
                       ...editor,
                       provider,
@@ -960,9 +994,7 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
                   placeholder="使用 provider 默认模型"
                   onChange={(event) => {
                     const model = event.target.value;
-                    if (typeof window !== "undefined") {
-                      window.localStorage.setItem("kb_last_image_model", model);
-                    }
+                    rememberImageModel(editor.provider, model);
                     onChange({
                       ...editor,
                       model,
@@ -1060,6 +1092,12 @@ function ImageGenerateModal({ editor, busy, onChange, onClose, onGeneratePreview
             </div>
           </div>
         </div>
+        {editor.error ? (
+          <div className="image-generate-error" role="alert">
+            <strong>接口调用失败</strong>
+            <span>{editor.error}</span>
+          </div>
+        ) : null}
         <div className="image-generate-footer">
           <button className="secondary" disabled={busy} onClick={onClose}>
             取消

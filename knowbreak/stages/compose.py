@@ -164,6 +164,8 @@ def _load_images_map(path: Path, out_dir: Path) -> tuple[dict[int, dict[int, str
         if cover.get("image_path"):
             covers[ti] = str(out_dir / cover["image_path"])
         for shot in topic.get("shots", []):
+            if shot.get("provider") == "pending":
+                continue
             result[ti][shot["shot_index"]] = str(out_dir / shot["image_path"])
     return result, covers
 

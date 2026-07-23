@@ -90,6 +90,10 @@ class Config:
     huggingface_api_token: str | None = None
     huggingface_image_model: str = "black-forest-labs/FLUX.1-schnell"
     huggingface_image_base_url: str = "https://router.huggingface.co/hf-inference/models"
+    volcengine_image_api_key: str | None = None
+    volcengine_image_model: str = "doubao-seedream-4-0-250828"
+    volcengine_image_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    volcengine_image_size: str = "2K"
 
     @property
     def inputs_dir(self) -> Path:
@@ -207,7 +211,18 @@ def _image_providers(runtime_image: dict) -> tuple[str, ...]:
         raw = runtime_image["provider"]
     else:
         raw = _env("KB_IMAGE_PROVIDERS", "pexels,pixabay")
-    providers = tuple(p.strip().lower().replace("-", "_") for p in raw.split(",") if p.strip())
+    aliases = {
+        "volc": "volcengine",
+        "volcano": "volcengine",
+        "volc_engine": "volcengine",
+        "ark": "volcengine",
+        "doubao": "volcengine",
+    }
+    providers = tuple(
+        aliases.get(normalized, normalized)
+        for p in raw.split(",")
+        if (normalized := p.strip().lower().replace("-", "_"))
+    )
     return providers or ("pexels", "pixabay")
 
 
@@ -364,5 +379,26 @@ def load_config() -> Config:
             ("huggingfaceBaseUrl", "huggingface_base_url"),
             "KB_HUGGINGFACE_IMAGE_BASE_URL",
             "https://router.huggingface.co/hf-inference/models",
+        ),
+        volcengine_image_api_key=_optional_env("KB_VOLCENGINE_IMAGE_API_KEY")
+        or _optional_env("KB_VOLC_IMAGE_API_KEY")
+        or _optional_env("ARK_API_KEY"),
+        volcengine_image_model=_runtime_env(
+            runtime_image,
+            ("volcengineModel", "volcengine_model", "volcModel", "volc_model"),
+            "KB_VOLCENGINE_IMAGE_MODEL",
+            "doubao-seedream-4-0-250828",
+        ),
+        volcengine_image_base_url=_runtime_env(
+            runtime_image,
+            ("volcengineBaseUrl", "volcengine_base_url", "volcBaseUrl", "volc_base_url"),
+            "KB_VOLCENGINE_IMAGE_BASE_URL",
+            "https://ark.cn-beijing.volces.com/api/v3",
+        ),
+        volcengine_image_size=_runtime_env(
+            runtime_image,
+            ("volcengineSize", "volcengine_size", "volcSize", "volc_size"),
+            "KB_VOLCENGINE_IMAGE_SIZE",
+            "2K",
         ),
     )

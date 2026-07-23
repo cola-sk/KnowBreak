@@ -173,7 +173,7 @@ def test_generated_providers_require_credentials_for_pipeline(tmp_path: Path) ->
         intro=IntroConfig(),
         out_dir=tmp_path / "out",
         project_root=tmp_path,
-        image_providers=("cloudflare_workers", "huggingface"),
+        image_providers=("cloudflare_workers", "huggingface", "volcengine"),
     )
 
     assert images._active_providers(Config(**base)) == []
@@ -182,7 +182,8 @@ def test_generated_providers_require_credentials_for_pipeline(tmp_path: Path) ->
         cloudflare_account_id="account",
         cloudflare_api_token="token",
         huggingface_api_token="hf_token",
-    )) == ["cloudflare_workers", "huggingface"]
+        volcengine_image_api_key="volc_token",
+    )) == ["cloudflare_workers", "huggingface", "volcengine"]
 
 
 def test_generated_provider_fetch_writes_generated_image_metadata(tmp_path: Path, monkeypatch) -> None:

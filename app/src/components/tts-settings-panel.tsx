@@ -60,6 +60,8 @@ export function imageOverridesFromSettings(settings: ImageRuntimeDefaults): Proj
       cloudflareModel: settings.cloudflareModel,
       huggingfaceModel: settings.huggingfaceModel,
       huggingfaceBaseUrl: settings.huggingfaceBaseUrl,
+      volcengineModel: settings.volcengineModel,
+      volcengineBaseUrl: settings.volcengineBaseUrl,
     },
   };
 }
@@ -268,7 +270,9 @@ export function ImageSettingsEditor({
     || value.image?.pollinationsModel
     || value.image?.cloudflareModel
     || value.image?.huggingfaceModel
-    || value.image?.huggingfaceBaseUrl,
+    || value.image?.huggingfaceBaseUrl
+    || value.image?.volcengineModel
+    || value.image?.volcengineBaseUrl,
   );
 
   const commitSettings = (settings: ImageRuntimeDefaults) => {
@@ -427,6 +431,46 @@ export function ImageSettingsEditor({
                 disabled={disabled}
                 value={effective.huggingfaceBaseUrl}
                 onChange={(event) => commitSettings({ ...effective, huggingfaceBaseUrl: event.target.value })}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Volcengine Ark Card */}
+        <div className={`image-provider-card ${effective.providers.includes("volcengine") ? "active" : "disabled"}`}>
+          <div className="image-provider-card-header">
+            <span className="image-provider-card-title">
+              火山引擎方舟（豆包生图）
+              <span className="badge generate">生成</span>
+            </span>
+            {effective.providers.includes("volcengine") ? (
+              <span className="badge success" style={{ fontSize: 10, padding: "2px 6px" }}>已启用</span>
+            ) : (
+              <span className="badge" style={{ fontSize: 10, padding: "2px 6px" }}>未启用</span>
+            )}
+          </div>
+          <div className="image-provider-card-fields">
+            <div className="image-provider-field">
+              <label>
+                <span>模型 / 推理接入点 ID</span>
+                <span className="image-provider-field-env-badge">KB_VOLCENGINE_IMAGE_MODEL</span>
+              </label>
+              <input
+                disabled={disabled}
+                value={effective.volcengineModel}
+                placeholder="doubao-seedream-4-0-250828 或 ep-..."
+                onChange={(event) => commitSettings({ ...effective, volcengineModel: event.target.value })}
+              />
+            </div>
+            <div className="image-provider-field">
+              <label>
+                <span>方舟 API 基础 URL</span>
+                <span className="image-provider-field-env-badge">KB_VOLCENGINE_IMAGE_BASE_URL</span>
+              </label>
+              <input
+                disabled={disabled}
+                value={effective.volcengineBaseUrl}
+                onChange={(event) => commitSettings({ ...effective, volcengineBaseUrl: event.target.value })}
               />
             </div>
           </div>
